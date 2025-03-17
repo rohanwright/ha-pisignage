@@ -1,0 +1,33 @@
+play_playlist:
+  name: Play Playlist
+  description: Start playing a specific playlist on a PiSignage player.
+  target:
+    entity:
+      domain: media_player
+      integration: pisignage
+  fields:
+    playlist:
+      name: Playlist
+      description: Name of the playlist to play.
+      required: true
+      example: "Welcome Playlist"
+      selector:
+        text:
+
+tv_control:
+  name: TV Control
+  description: Turn on or off the TV connected to the PiSignage player.
+  target:
+    entity:
+      domain: media_player
+      integration: pisignage
+  fields:
+    status:
+      name: Status
+      description: Set to 'on' or 'off'
+      required: true
+      selector:
+        select:
+          options:
+            - "on"
+            - "off"

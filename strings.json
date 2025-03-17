@@ -1,0 +1,55 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to PiSignage Server",
+        "description": "Set up your PiSignage integration. You need the server IP address and your authentication credentials.",
+        "data": {
+          "host": "Server Hostname or IP",
+          "port": "Server Port (default: 3000)",
+          "username": "Username",
+          "password": "Password"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to the server",
+      "auth_failed": "Authentication failed, check your credentials",
+      "timeout_connect": "Connection timed out",
+      "unknown": "Unexpected error"
+    },
+    "abort": {
+      "already_configured": "This PiSignage server is already configured"
+    }
+  },
+  "services": {
+    "play_playlist": {
+      "name": "Play Playlist",
+      "description": "Start playing a specific playlist on a PiSignage player.",
+      "fields": {
+        "entity_id": {
+          "name": "Player",
+          "description": "The PiSignage player to control."
+        },
+        "playlist": {
+          "name": "Playlist",
+          "description": "Name of the playlist to play."
+        }
+      }
+    },
+    "tv_control": {
+      "name": "TV Control",
+      "description": "Turn on or off the TV connected to the PiSignage player.",
+      "fields": {
+        "entity_id": {
+          "name": "Player",
+          "description": "The PiSignage player to control."
+        },
+        "status": {
+          "name": "Status",
+          "description": "Set to 'on' or 'off'."
+        }
+      }
+    }
+  }
+}

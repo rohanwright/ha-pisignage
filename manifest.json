@@ -1,0 +1,11 @@
+{
+  "domain": "pisignage",
+  "name": "PiSignage",
+  "documentation": "https://github.com/username/ha-pisignage",
+  "dependencies": [],
+  "codeowners": ["@username"],
+  "requirements": ["requests>=2.25.1"],
+  "iot_class": "local_polling",
+  "version": "0.1.0",
+  "config_flow": true
+}

@@ -1,0 +1,36 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to PiSignage",
+        "description": "Set up your PiSignage integration. Select the type of connection and enter required details.",
+        "data": {
+          "server_type": "Connection Type",
+          "host": "Server Hostname or IP",
+          "port": "Server Port",
+          "username": "Username/Email",
+          "password": "Password",
+          "use_ssl": "Use SSL (HTTPS)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to the server",
+      "auth_failed": "Authentication failed, check your credentials",
+      "timeout_connect": "Connection timed out",
+      "unknown": "Unexpected error"
+    },
+    "abort": {
+      "already_configured": "This PiSignage server is already configured"
+    }
+  },
+  "selector": {
+    "server_type": {
+      "options": {
+        "hosted": "Hosted (pisignage.com)",
+        "open_source": "Open Source Server",
+        "player": "Player Direct Connection"
+      }
+    }
+  }
+}
