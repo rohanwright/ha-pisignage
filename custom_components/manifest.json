@@ -1,7 +1,7 @@
 {
   "domain": "pisignage",
   "name": "PiSignage",
-  "documentation": "https://github.com/username/ha-pisignage",
+  "documentation": "https://github.com/rohanwright/ha-pisignage",
   "dependencies": [],
   "codeowners": ["@username"],
   "requirements": ["requests>=2.25.1"],

@@ -1,0 +1,9 @@
+{
+  "name": "PiSignage Integration",
+  "content_in_root": false,
+  "domains": ["media_player", "sensor"],
+  "country": "US",
+  "homeassistant": "2021.6.0",
+  "iot_class": "cloud_polling",
+  "render_readme": true
+}
