@@ -125,7 +125,7 @@ class PiSignageStatusSensor(PiSignageBaseSensor):
                 last_seen_dt = datetime.fromisoformat(last_seen.replace("Z", "+00:00"))
                 attrs[ATTR_LAST_SEEN] = last_seen_dt
             except (ValueError, AttributeError):
-                pass
+                attrs[ATTR_LAST_SEEN] = last_seen
             
         return attrs
 
@@ -146,7 +146,7 @@ class PiSignageTemperatureSensor(PiSignageBaseSensor):
     def state(self) -> float:
         """Return the state of the sensor."""
         try:
-            return float(self._player_data.get("temperatureData", {}).get("temperature"))
+            return float(self._player_data.get("piTemperature"))
         except (ValueError, TypeError):
             return None
 
@@ -173,7 +173,7 @@ class PiSignageStorageSensor(PiSignageBaseSensor):
         """Return the state of the sensor."""
         try:
             # Convert from GB to MB for consistent unit presentation
-            free_space_gb = float(self._player_data.get("storageData", {}).get("free", 0))
+            free_space_gb = float(self._player_data.get("diskSpaceAvailable", "0G").replace("G", ""))
             return free_space_gb * 1024  # Convert GB to MB
         except (ValueError, TypeError):
             return None
@@ -187,16 +187,13 @@ class PiSignageStorageSensor(PiSignageBaseSensor):
     def extra_state_attributes(self) -> dict:
         """Return the state attributes."""
         attrs = {}
-        storage_data = self._player_data.get("storageData", {})
+        storage_data = self._player_data
         
-        if free := storage_data.get("free"):
-            attrs[ATTR_FREE_SPACE] = f"{free} GB"
+        if free := storage_data.get("diskSpaceAvailable"):
+            attrs[ATTR_FREE_SPACE] = free
             
-        if total := storage_data.get("total"):
-            attrs["total_space"] = f"{total} GB"
-            
-        if used := storage_data.get("used"):
-            attrs["used_space"] = f"{used} GB"
+        if used := storage_data.get("diskSpaceUsed"):
+            attrs["used_space"] = used
             
         return attrs
 
@@ -212,7 +209,7 @@ class PiSignageUptimeSensor(PiSignageBaseSensor):
     def state(self) -> str:
         """Return the state of the sensor."""
         try:
-            uptime = self._player_data.get("statusData", {}).get("uptime", "")
+            uptime = self._player_data.get("uptime", "")
             return uptime
         except (TypeError, AttributeError):
             return STATE_UNKNOWN

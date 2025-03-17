@@ -13,6 +13,7 @@ from homeassistant.helpers.update_coordinator import (
     DataUpdateCoordinator,
     UpdateFailed,
 )
+from homeassistant.helpers import device_registry as dr
 
 from .const import (
     DOMAIN,
@@ -60,7 +61,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # For hosted servers, format is: https://username.pisignage.com/api
         username = entry.data[CONF_USERNAME]
         # Always use HTTPS for hosted servers
-        api_server = f"https://{username}.pisignage.com/api"
+        api_server = f"https://{username}?.pisignage.com/api"
         _LOGGER.info("Connecting to hosted PiSignage server: %s", api_server)
     else:
         # For open source servers or players
@@ -100,7 +101,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     
     # Create devices for each player
     players = coordinator.data.get(CONF_PLAYERS, [])
-    device_registry = await hass.helpers.device_registry.async_get_registry()
+    device_registry = dr.async_get(hass)
     for player in players:
         player_id = player.get("_id")
         player_name = player.get("name", f"Player {player_id}")
