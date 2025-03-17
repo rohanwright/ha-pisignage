@@ -6,7 +6,7 @@
         "description": "Set up your PiSignage integration. Select the type of connection and enter required details.",
         "data": {
           "server_type": "Connection Type",
-          "host": "Server Hostname or IP",
+          "host": "Server Hostname/IP or pisignage.com username",
           "port": "Server Port",
           "username": "Username/Email",
           "password": "Password",

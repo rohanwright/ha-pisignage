@@ -17,7 +17,7 @@ This custom component integrates PiSignage with Home Assistant, allowing you to 
 1. Ensure [HACS](https://hacs.xyz/) is installed in your Home Assistant instance
 2. Add this repository as a custom repository in HACS:
    - Go to HACS → Integrations → ⋮ (three dots) → Custom repositories
-   - Add URL: `https://github.com/username/ha-pisignage`
+   - Add URL: `https://github.com/rohanwright/ha-pisignage`
    - Category: Integration
 3. Click "Install" on the PiSignage integration
 4. Restart Home Assistant
