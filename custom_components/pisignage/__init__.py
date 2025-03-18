@@ -61,7 +61,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # For hosted servers, format is: https://username.pisignage.com/api
         username = entry.data[CONF_USERNAME]
         # Always use HTTPS for hosted servers
-        api_server = f"https://{username}?.pisignage.com/api"
+        api_server = f"https://{username}.pisignage.com/api"
         _LOGGER.info("Connecting to hosted PiSignage server: %s", api_server)
     else:
         # For open source servers or players
@@ -188,22 +188,13 @@ class PiSignageAPI:
                          {k: v for k, v in data.items() if k != "data"})
             
             # Check for various success indicators
-            if data.get("success") is True:
-                # Standard success response
-                self.token = data.get("data", {}).get("token")
-                if self.token:
-                    _LOGGER.debug("Authentication successful, token received from standard response")
-                    return self.token
-            elif "token" in data:
-                # Direct token in response (different API format)
+            if data.get("token"):
                 self.token = data.get("token")
-                _LOGGER.debug("Authentication successful, token received directly in response")
+                _LOGGER.debug("Authentication successful, token received")
                 return self.token
             elif data.get("success") is False:
-                # Explicit failure
                 _LOGGER.error("Authentication failed: %s", data.get("stat_message", "Unknown error"))
             else:
-                # Unclear response
                 _LOGGER.error("Authentication failed: Unexpected response format")
                 
             return None
@@ -294,7 +285,7 @@ class PiSignageAPI:
         try:
             response = self.session.post(
                 f"{self.api_server}/pitv/{player_id}",
-                json={"status": "0", "token": self.token},
+                json={"status": False, "token": self.token},
                 timeout=10,
             )
             response.raise_for_status()
@@ -318,7 +309,7 @@ class PiSignageAPI:
         try:
             response = self.session.post(
                 f"{self.api_server}/pitv/{player_id}",
-                json={"status": "1", "token": self.token},
+                json={"status": True, "token": self.token},
                 timeout=10,
             )
             response.raise_for_status()

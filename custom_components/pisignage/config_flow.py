@@ -189,22 +189,15 @@ class PiSignageConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 _LOGGER.debug("Full response: %s", result)
                 
                 # Check for successful response - either a "success" field or presence of token
-                if result.get("success") is False:
-                    # Explicit failure
-                    _LOGGER.error("Authentication failed with message: %s", 
-                                 result.get("stat_message", "Unknown error"))
-                    return result
-                elif "token" in result:
-                    # Direct token response (different API format)
+                if result.get("token"):
                     _LOGGER.debug("Authentication successful, token found in response")
                     # Create a compatible response structure
                     return {"success": True, "data": {"token": result.get("token")}}
-                elif result.get("success") is True:
-                    # Standard success response
-                    _LOGGER.debug("Authentication successful, using standard response format")
+                elif result.get("success") is False:
+                    _LOGGER.error("Authentication failed with message: %s", 
+                                 result.get("stat_message", "Unknown error"))
                     return result
                 else:
-                    # No clear success/failure indicator
                     _LOGGER.error("Ambiguous authentication response, no success flag or token found")
                     return {"success": False, "stat_message": "Ambiguous response"}
             except ValueError as ex:

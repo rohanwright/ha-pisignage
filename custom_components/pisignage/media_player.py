@@ -242,7 +242,7 @@ class PiSignageMediaPlayer(MediaPlayerEntity):
         """Send next track command."""
         _LOGGER.info("Sending next track command to player %s", self._name)
         await self.hass.async_add_executor_job(
-            self.api.media_control, self._player_id, "next"
+            self.api.media_control, self._player_id, "forward"
         )
         await self.coordinator.async_request_refresh()
 
@@ -250,7 +250,7 @@ class PiSignageMediaPlayer(MediaPlayerEntity):
         """Send previous track command."""
         _LOGGER.info("Sending previous track command to player %s", self._name)
         await self.hass.async_add_executor_job(
-            self.api.media_control, self._player_id, "previous"
+            self.api.media_control, self._player_id, "backward"
         )
         await self.coordinator.async_request_refresh()
 
