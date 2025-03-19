@@ -223,7 +223,7 @@ class PiSignageAPI:
             data = response.json()
             
             # Log the raw response for debugging
-            _LOGGER.debug("Raw players response: %s", data)
+            # _LOGGER.debug("Raw players response: %s", data)
             
             if data.get("success"):
                 players = data.get("data", [])
@@ -258,7 +258,7 @@ class PiSignageAPI:
             data = response.json()
             
             # Log the raw response for debugging
-            _LOGGER.debug("Raw player details response for %s: %s", player_id, data)
+            # _LOGGER.debug("Raw player details response for %s: %s", player_id, data)
             
             if data.get("success"):
                 _LOGGER.debug("Successfully retrieved details for player: %s", player_id)
@@ -285,7 +285,7 @@ class PiSignageAPI:
         try:
             response = self.session.post(
                 f"{self.api_server}/pitv/{player_id}",
-                json={"status": False, "token": self.token},
+                json={"status": True, "token": self.token},
                 timeout=10,
             )
             response.raise_for_status()
@@ -309,7 +309,7 @@ class PiSignageAPI:
         try:
             response = self.session.post(
                 f"{self.api_server}/pitv/{player_id}",
-                json={"status": True, "token": self.token},
+                json={"status": False, "token": self.token},
                 timeout=10,
             )
             response.raise_for_status()
@@ -409,6 +409,65 @@ class PiSignageAPI:
             return []
         except requests.exceptions.RequestException as ex:
             _LOGGER.error("Error fetching playlists: %s", ex)
+            raise
+
+    def update_group_playlist(self, group_id, playlist_name):
+        """Update the default playlist for a group."""
+        _LOGGER.debug("Fetching current data for group %s before updating playlist", group_id)
+        if not self.token:
+            _LOGGER.debug("No auth token, re-authenticating")
+            self.authenticate()
+
+        try:
+            # Fetch current group data
+            response = self.session.get(
+                f"{self.api_server}/groups/{group_id}",
+                params={"token": self.token},
+                timeout=10,
+            )
+            response.raise_for_status()
+            group_data = response.json()
+            _LOGGER.debug("Current group data for %s: %s", group_id, group_data)
+
+            # Prepare updated playlists array
+            playlists = group_data.get("data", {}).get("playlists", [])
+            if playlists:
+                playlists[0]["name"] = playlist_name  # Replace only the first playlist
+            else:
+                playlists = [{"name": playlist_name}]  # Add the playlist if none exist
+
+            # Update the playlist
+            _LOGGER.debug("Updating default playlist for group %s to %s", group_id, playlist_name)
+            response = self.session.post(
+                f"{self.api_server}/groups/{group_id}",
+                json={"playlists": playlists},
+                params={"token": self.token},
+                timeout=10,
+            )
+            response.raise_for_status()
+            data = response.json()
+            if not data.get("success"):
+                _LOGGER.error("Failed to update playlist for group %s: %s", group_id, data.get("stat_message", "Unknown error"))
+                return data
+
+            # Deploy the updated playlist
+            _LOGGER.debug("Deploying updated playlist for group %s", group_id)
+            deploy_response = self.session.put(
+                f"{self.api_server}/groups/{group_id}",
+                json={"deploy": True},
+                params={"token": self.token},
+                timeout=10,
+            )
+            deploy_response.raise_for_status()
+            deploy_data = deploy_response.json()
+            if deploy_data.get("success"):
+                _LOGGER.info("Successfully deployed playlist for group %s", group_id)
+            else:
+                _LOGGER.error("Failed to deploy playlist for group %s: %s", group_id, deploy_data.get("stat_message", "Unknown error"))
+
+            return deploy_data
+        except requests.exceptions.RequestException as ex:
+            _LOGGER.error("Error updating or deploying playlist for group %s: %s", group_id, ex)
             raise
 
 

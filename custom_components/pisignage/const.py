@@ -36,8 +36,6 @@ ATTR_IP = "ip_address"
 ATTR_LAST_SEEN = "last_seen"
 ATTR_CURRENT_PLAYLIST = "current_playlist"
 ATTR_CURRENT_FILE = "current_file"
-ATTR_TEMPERATURE = "temperature"
-ATTR_UPTIME = "uptime"
 ATTR_FREE_SPACE = "free_space"
 ATTR_TV_STATUS = "tv_status"
 

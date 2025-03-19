@@ -4,7 +4,7 @@ from datetime import datetime
 
 from homeassistant.components.sensor import SensorEntity, SensorDeviceClass
 from homeassistant.const import PERCENTAGE, STATE_UNKNOWN
-from homeassistant.const import UnitOfTemperature, UnitOfInformation
+from homeassistant.const import UnitOfInformation
 
 from .const import (
     DOMAIN,
@@ -13,8 +13,6 @@ from .const import (
     ATTR_IP,
     ATTR_LAST_SEEN,
     ATTR_FREE_SPACE,
-    ATTR_UPTIME,
-    ATTR_TEMPERATURE,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -31,15 +29,8 @@ async def async_setup_entry(hass, entry, async_add_entities):
         # Status sensor
         entities.append(PiSignageStatusSensor(coordinator, player))
         
-        # Temperature sensor if available
-        if "temperatureData" in player:
-            entities.append(PiSignageTemperatureSensor(coordinator, player))
-            
         # Storage sensor
         entities.append(PiSignageStorageSensor(coordinator, player))
-        
-        # Uptime sensor 
-        entities.append(PiSignageUptimeSensor(coordinator, player))
     
     async_add_entities(entities, True)
 
@@ -107,7 +98,11 @@ class PiSignageStatusSensor(PiSignageBaseSensor):
     @property
     def state(self) -> str:
         """Return the state of the sensor."""
-        return self._player_data.get("status", STATE_UNKNOWN)
+        if self._player_data.get("connectionCount", 0) < 1:
+            return "Disconnected"
+        if self._player_data.get("playlistOn"):
+            return "Playing"
+        return "Idle"
 
     @property
     def extra_state_attributes(self) -> dict:
@@ -128,32 +123,6 @@ class PiSignageStatusSensor(PiSignageBaseSensor):
                 attrs[ATTR_LAST_SEEN] = last_seen
             
         return attrs
-
-
-class PiSignageTemperatureSensor(PiSignageBaseSensor):
-    """Representation of a PiSignage temperature sensor."""
-
-    def __init__(self, coordinator, player):
-        """Initialize the temperature sensor."""
-        super().__init__(coordinator, player, "temperature")
-
-    @property
-    def device_class(self) -> str:
-        """Return the device class of the sensor."""
-        return SensorDeviceClass.TEMPERATURE
-
-    @property
-    def state(self) -> float:
-        """Return the state of the sensor."""
-        try:
-            return float(self._player_data.get("piTemperature"))
-        except (ValueError, TypeError):
-            return None
-
-    @property
-    def native_unit_of_measurement(self) -> str:
-        """Return the unit of measurement."""
-        return UnitOfTemperature.CELSIUS
 
 
 class PiSignageStorageSensor(PiSignageBaseSensor):
@@ -195,28 +164,4 @@ class PiSignageStorageSensor(PiSignageBaseSensor):
         if used := storage_data.get("diskSpaceUsed"):
             attrs["used_space"] = used
             
-        return attrs
-
-
-class PiSignageUptimeSensor(PiSignageBaseSensor):
-    """Representation of a PiSignage uptime sensor."""
-
-    def __init__(self, coordinator, player):
-        """Initialize the uptime sensor."""
-        super().__init__(coordinator, player, "uptime")
-
-    @property
-    def state(self) -> str:
-        """Return the state of the sensor."""
-        try:
-            uptime = self._player_data.get("uptime", "")
-            return uptime
-        except (TypeError, AttributeError):
-            return STATE_UNKNOWN
-
-    @property
-    def extra_state_attributes(self) -> dict:
-        """Return the state attributes."""
-        attrs = {}
-        attrs[ATTR_UPTIME] = self.state
         return attrs

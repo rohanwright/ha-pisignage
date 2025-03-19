@@ -16,6 +16,7 @@ from homeassistant.const import (
     STATE_PLAYING,
     STATE_UNKNOWN,
     STATE_PAUSED,
+    STATE_STANDBY,
 )
 
 from .const import (
@@ -113,25 +114,15 @@ class PiSignageMediaPlayer(MediaPlayerEntity):
     @property
     def state(self) -> str:
         """Return the state of the device."""
-        if not self._player_data:
-            _LOGGER.debug("No player data available for %s, returning unknown state", self._name)
-            return STATE_UNKNOWN
-            
-        tv_status = self._player_data.get("tvStatus")
-        if tv_status == "0":
-            _LOGGER.debug("TV is off for player %s", self._name)
+        if self._player_data.get("connectionCount", 0) < 1:
+            _LOGGER.debug("Player %s is off and disconnected from the server", self._name)
             return STATE_OFF
-        
-        player_status = self._player_data.get("statusData", {})
-        playlist_on = player_status.get("playlistOn", False)
-        
-        if playlist_on:
-            if player_status.get("paused", False):
-                _LOGGER.debug("Player %s is paused", self._name)
-                return STATE_PAUSED
+        if self._player_data.get("playlistOn")&self._player_data.get("tvStatus"):
             _LOGGER.debug("Player %s is playing", self._name)
             return STATE_PLAYING
-        
+        if not self._player_data.get("tvStatus"):
+            _LOGGER.debug("Player %s is on", self._name)
+            return STATE_STANDBY
         _LOGGER.debug("Player %s is idle", self._name)
         return STATE_IDLE
 
@@ -143,14 +134,12 @@ class PiSignageMediaPlayer(MediaPlayerEntity):
     @property
     def media_title(self) -> Optional[str]:
         """Return the title of current playing media."""
-        current_play = self._player_data.get("statusData", {}).get("currentPlay", {})
-        title = current_play.get("filename", "Unknown")
-        return title
+        return self._player_data.get("currentPlaylist", "Unknown")
 
     @property
     def source(self) -> Optional[str]:
         """Return the current playlist."""
-        return self._player_data.get("statusData", {}).get("playlistPlaying")
+        return self._player_data.get("currentPlaylist")
 
     @property
     def source_list(self) -> List[str]:
@@ -268,4 +257,12 @@ class PiSignageMediaPlayer(MediaPlayerEntity):
     async def async_select_source(self, source: str) -> None:
         """Select playlist to play."""
         _LOGGER.info("Selecting source '%s' on player %s", source, self._name)
-        await self.async_play_media(MEDIA_TYPE_PLAYLIST, source)
+        group_id = self._player_data.get("group", {}).get("_id")
+        if not group_id:
+            _LOGGER.error("No group assigned to player %s", self._name)
+            return
+
+        await self.hass.async_add_executor_job(
+            self.api.update_group_playlist, group_id, source
+        )
+        await self.coordinator.async_request_refresh()
