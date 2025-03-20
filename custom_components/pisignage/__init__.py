@@ -426,15 +426,27 @@ class PiSignageAPI:
                 timeout=10,
             )
             response.raise_for_status()
+            
             group_data = response.json()
             _LOGGER.debug("Current group data for %s: %s", group_id, group_data)
+
+            # Fetch the full playlist object
+            _LOGGER.debug("Fetching full playlist data for '%s'", playlist_name)
+            playlist_response = self.session.get(
+                f"{self.api_server}/playlists/{playlist_name}",
+                params={"token": self.token},
+                timeout=10,
+            )
+            playlist_response.raise_for_status()
+            playlist_data = playlist_response.json().get("data", {})
+            _LOGGER.debug("Fetched playlist data: %s", playlist_data)
 
             # Prepare updated playlists array
             playlists = group_data.get("data", {}).get("playlists", [])
             if playlists:
-                playlists[0]["name"] = playlist_name  # Replace only the first playlist
+                playlists[0] = playlist_data  # Replace only the first playlist with the full object
             else:
-                playlists = [{"name": playlist_name}]  # Add the playlist if none exist
+                playlists = [playlist_data]  # Add the playlist if none exist
 
             # Update the playlist
             _LOGGER.debug("Updating default playlist for group %s to %s", group_id, playlist_name)
@@ -450,11 +462,25 @@ class PiSignageAPI:
                 _LOGGER.error("Failed to update playlist for group %s: %s", group_id, data.get("stat_message", "Unknown error"))
                 return data
 
-            # Deploy the updated playlist
-            _LOGGER.debug("Deploying updated playlist for group %s", group_id)
-            deploy_response = self.session.put(
+            # Fetch the updated group data
+            _LOGGER.debug("Fetching updated group data for %s", group_id)
+            updated_response = self.session.get(
                 f"{self.api_server}/groups/{group_id}",
-                json={"deploy": True},
+                params={"token": self.token},
+                timeout=10,
+            )
+            updated_response.raise_for_status()
+            updated_group_data = updated_response.json().get("data", {})
+            
+            # Add deploy flag to the updated group data
+            updated_group_data["deploy"] = True
+            _LOGGER.debug("Updated group data with deploy flag for %s: %s", group_id, updated_group_data)
+
+            # Deploy the updated group data
+            _LOGGER.debug("Deploying updated group data for group %s", group_id)
+            deploy_response = self.session.post(
+                f"{self.api_server}/groups/{group_id}",
+                json=updated_group_data,
                 params={"token": self.token},
                 timeout=10,
             )
