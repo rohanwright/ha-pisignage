@@ -31,6 +31,10 @@ async def async_setup_entry(hass, entry, async_add_entities):
         
         # Storage sensor
         entities.append(PiSignageStorageSensor(coordinator, player))
+        
+        # Additional sensors
+        entities.append(PiSignageMyIpAddressSensor(coordinator, player))
+
     
     async_add_entities(entities, True)
 
@@ -98,11 +102,20 @@ class PiSignageStatusSensor(PiSignageBaseSensor):
     @property
     def state(self) -> str:
         """Return the state of the sensor."""
-        if self._player_data.get("connectionCount", 0) < 1:
-            return "Disconnected"
-        if self._player_data.get("playlistOn"):
-            return "Playing"
-        return "Idle"
+        is_connected = self._player_data.get("isConnected", False)
+        is_cec_supported = self._player_data.get("isCecSupported", False)
+        cec_tv_status = self._player_data.get("cecTvStatus", False)
+        playlist_on = self._player_data.get("playlistOn", False)
+
+        if not is_connected:
+            return "Offline"
+        if not is_cec_supported:
+            return "Playing" if playlist_on else "Not Playing"
+        if not cec_tv_status:
+            return "TV Powered Off"
+        if playlist_on:
+            return "Playing (No TV Control)"
+        return "Not Playing (No TV Control)"
 
     @property
     def extra_state_attributes(self) -> dict:
@@ -112,7 +125,7 @@ class PiSignageStatusSensor(PiSignageBaseSensor):
         if version := self._player_data.get("version"):
             attrs[ATTR_VERSION] = version
             
-        if ip := self._player_data.get("ip"):
+        if ip := self._player_data.get("myIpAddress"):
             attrs[ATTR_IP] = ip
             
         if last_seen := self._player_data.get("lastReported"):
@@ -121,8 +134,19 @@ class PiSignageStatusSensor(PiSignageBaseSensor):
                 attrs[ATTR_LAST_SEEN] = last_seen_dt
             except (ValueError, AttributeError):
                 attrs[ATTR_LAST_SEEN] = last_seen
-            
+
+        # Add additional attributes with user-friendly names
+        attrs["Is Connected"] = self._player_data.get("isConnected", False)
+        attrs["CEC Supported"] = self._player_data.get("isCecSupported", False)
+        attrs["CEC TV Status"] = self._player_data.get("cecTvStatus", False)
+        attrs["Playlist Active"] = self._player_data.get("playlistOn", False)
+        
         return attrs
+
+    @property
+    def name(self) -> str:
+        """Return the name of the sensor."""
+        return f"{self._player_name} Status"
 
 
 class PiSignageStorageSensor(PiSignageBaseSensor):
@@ -133,24 +157,18 @@ class PiSignageStorageSensor(PiSignageBaseSensor):
         super().__init__(coordinator, player, "storage")
 
     @property
-    def device_class(self) -> str:
-        """Return the device class of the sensor."""
-        return SensorDeviceClass.DATA_SIZE
-
-    @property
     def state(self) -> float:
         """Return the state of the sensor."""
         try:
-            # Convert from GB to MB for consistent unit presentation
-            free_space_gb = float(self._player_data.get("diskSpaceAvailable", "0G").replace("G", ""))
-            return free_space_gb * 1024  # Convert GB to MB
+            used_space_percentage = float(self._player_data.get("diskSpaceUsed", "0%").replace("%", ""))
+            return used_space_percentage  # Return used space percentage
         except (ValueError, TypeError):
             return None
 
     @property
     def native_unit_of_measurement(self) -> str:
         """Return the unit of measurement."""
-        return UnitOfInformation.MEGABYTES
+        return PERCENTAGE
 
     @property
     def extra_state_attributes(self) -> dict:
@@ -161,7 +179,27 @@ class PiSignageStorageSensor(PiSignageBaseSensor):
         if free := storage_data.get("diskSpaceAvailable"):
             attrs[ATTR_FREE_SPACE] = free
             
-        if used := storage_data.get("diskSpaceUsed"):
-            attrs["used_space"] = used
-            
         return attrs
+
+    @property
+    def name(self) -> str:
+        """Return the name of the sensor."""
+        return f"{self._player_name} Storage Usage"
+
+
+class PiSignageMyIpAddressSensor(PiSignageBaseSensor):
+    """Representation of a PiSignage myIpAddress sensor."""
+
+    def __init__(self, coordinator, player):
+        """Initialize the myIpAddress sensor."""
+        super().__init__(coordinator, player, "myIpAddress")
+
+    @property
+    def state(self) -> str:
+        """Return the state of the sensor."""
+        return self._player_data.get("myIpAddress", STATE_UNKNOWN).strip()
+
+    @property
+    def name(self) -> str:
+        """Return the name of the sensor."""
+        return f"{self._player_name} Player IP"

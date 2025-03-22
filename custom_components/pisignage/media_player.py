@@ -56,11 +56,10 @@ async def async_setup_entry(hass, entry, async_add_entities):
     for player in players:
         player_id = player.get("_id")
         player_name = player.get("name", f"Player {player_id}")
-        _LOGGER.info("Adding PiSignage media player: %s (ID: %s)", player_name, player_id)
         entities.append(PiSignageMediaPlayer(coordinator, api, player))
     
     async_add_entities(entities, True)
-    _LOGGER.debug("Added %d PiSignage media player entities", len(entities))
+    _LOGGER.info("Added %d PiSignage media player entities", len(entities))
 
 
 class PiSignageMediaPlayer(MediaPlayerEntity):
@@ -114,16 +113,24 @@ class PiSignageMediaPlayer(MediaPlayerEntity):
     @property
     def state(self) -> str:
         """Return the state of the device."""
-        if self._player_data.get("connectionCount", 0) < 1:
-            _LOGGER.debug("Player %s is off and disconnected from the server", self._name)
+        if not self._player_data.get("isConnected", False):
             return STATE_OFF
-        if self._player_data.get("playlistOn")&self._player_data.get("tvStatus"):
-            _LOGGER.debug("Player %s is playing", self._name)
-            return STATE_PLAYING
-        if not self._player_data.get("tvStatus"):
-            _LOGGER.debug("Player %s is on", self._name)
+
+        is_cec_supported = self._player_data.get("isCecSupported", False)
+        cec_tv_status = self._player_data.get("cecTvStatus", False)
+        playlist_on = self._player_data.get("playlistOn", False)
+
+        if not is_cec_supported:
+            if playlist_on:
+                return STATE_PLAYING
+            return STATE_IDLE
+
+        if not cec_tv_status:
             return STATE_STANDBY
-        _LOGGER.debug("Player %s is idle", self._name)
+
+        if playlist_on:
+            return STATE_PLAYING
+
         return STATE_IDLE
 
     @property
@@ -180,13 +187,11 @@ class PiSignageMediaPlayer(MediaPlayerEntity):
 
     async def async_update(self) -> None:
         """Update the player data."""
-        _LOGGER.debug("Updating player data for %s", self._name)
         await self.coordinator.async_request_refresh()
         players = self.coordinator.data.get(CONF_PLAYERS, [])
         
         for player in players:
             if player.get("_id") == self._player_id:
-                _LOGGER.debug("Found updated data for player %s", self._name)
                 self._player_data = player
                 self._available = True
                 self._update_sources()

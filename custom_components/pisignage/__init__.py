@@ -413,83 +413,96 @@ class PiSignageAPI:
 
     def update_group_playlist(self, group_id, playlist_name):
         """Update the default playlist for a group."""
-        _LOGGER.debug("Fetching current data for group %s before updating playlist", group_id)
+        _LOGGER.debug("Starting update_group_playlist for group %s with playlist %s", group_id, playlist_name)
         if not self.token:
             _LOGGER.debug("No auth token, re-authenticating")
             self.authenticate()
 
         try:
-            # Fetch current group data
-            response = self.session.get(
+            # Step 1: Get the group's data
+            _LOGGER.debug("Fetching group data for group %s", group_id)
+            group_response = self.session.get(
                 f"{self.api_server}/groups/{group_id}",
                 params={"token": self.token},
                 timeout=10,
             )
-            response.raise_for_status()
-            
-            group_data = response.json()
-            _LOGGER.debug("Current group data for %s: %s", group_id, group_data)
+            group_response.raise_for_status()
+            group_data = group_response.json().get("data", {})
+            _LOGGER.debug("Fetched group data: %s", group_data)
 
-            # Fetch the full playlist object
-            _LOGGER.debug("Fetching full playlist data for '%s'", playlist_name)
-            playlist_response = self.session.get(
-                f"{self.api_server}/playlists/{playlist_name}",
+            # Step 2: Get all playlists data
+            _LOGGER.debug("Fetching all playlists data")
+            playlists_response = self.session.get(
+                f"{self.api_server}/playlists",
                 params={"token": self.token},
                 timeout=10,
             )
-            playlist_response.raise_for_status()
-            playlist_data = playlist_response.json().get("data", {})
-            _LOGGER.debug("Fetched playlist data: %s", playlist_data)
+            playlists_response.raise_for_status()
+            all_playlists = playlists_response.json().get("data", [])
+            _LOGGER.debug("Fetched %d playlists", len(all_playlists))
 
-            # Prepare updated playlists array
-            playlists = group_data.get("data", {}).get("playlists", [])
-            if playlists:
-                playlists[0] = playlist_data  # Replace only the first playlist with the full object
+            # Step 3: Find the playlist data for the specified playlist_name
+            _LOGGER.debug("Finding playlist data for playlist %s", playlist_name)
+            target_playlist = next(
+                (playlist for playlist in all_playlists if playlist.get("name") == playlist_name), None
+            )
+            if not target_playlist:
+                _LOGGER.error("Playlist %s not found", playlist_name)
+                return {"success": False, "stat_message": f"Playlist {playlist_name} not found"}
+            _LOGGER.debug("Found target playlist data: %s", target_playlist)
+
+            # Step 4: Replace the first playlist in the group's playlists data
+            group_playlists = group_data.get("playlists", [])
+            if group_playlists:
+                group_playlists[0] = {
+                    "name": target_playlist.get("name"),
+                    "settings": target_playlist.get("settings", {})
+                }
             else:
-                playlists = [playlist_data]  # Add the playlist if none exist
+                group_playlists = [{
+                    "name": target_playlist.get("name"),
+                    "settings": target_playlist.get("settings", {})
+                }]
+            _LOGGER.debug("Updated group playlists: %s", group_playlists)
 
-            # Update the playlist
-            _LOGGER.debug("Updating default playlist for group %s to %s", group_id, playlist_name)
-            response = self.session.post(
-                f"{self.api_server}/groups/{group_id}",
-                json={"playlists": playlists},
-                params={"token": self.token},
-                timeout=10,
-            )
-            response.raise_for_status()
-            data = response.json()
-            if not data.get("success"):
-                _LOGGER.error("Failed to update playlist for group %s: %s", group_id, data.get("stat_message", "Unknown error"))
-                return data
+            # Step 5: Generate a new array of all asset names across the playlists
+            _LOGGER.debug("Generating asset names array from updated playlists")
+            asset_names = set()
+            for playlist in all_playlists:
+                if playlist.get("name") in [pl.get("name") for pl in group_playlists]:
+                    for asset in playlist.get("assets", []):
+                        if "filename" in asset:
+                            asset_names.add(asset["filename"])
+                    # Add the "__playListName.json" asset for the playlist
+                    asset_names.add(f"__{playlist.get('name')}.json")
+                    # Add the templateName if it exists
+                    if template_name := playlist.get("templateName"):
+                        asset_names.add(template_name)
+            asset_names = list(asset_names)
+            _LOGGER.debug("Generated asset names: %s", asset_names)
 
-            # Fetch the updated group data
-            _LOGGER.debug("Fetching updated group data for %s", group_id)
-            updated_response = self.session.get(
-                f"{self.api_server}/groups/{group_id}",
-                params={"token": self.token},
-                timeout=10,
-            )
-            updated_response.raise_for_status()
-            updated_group_data = updated_response.json().get("data", {})
-            
-            # Add deploy flag to the updated group data
-            updated_group_data["deploy"] = True
-            _LOGGER.debug("Updated group data with deploy flag for %s: %s", group_id, updated_group_data)
+            # Step 6: Create a new group data object
+            new_group_data = {
+                "playlists": group_playlists,
+                "assets": asset_names,
+                "deploy": True
+            }
+            _LOGGER.debug("Created new group data: %s", new_group_data)
 
-            # Deploy the updated group data
-            _LOGGER.debug("Deploying updated group data for group %s", group_id)
+            # Step 7: POST the new group data
+            _LOGGER.debug("Posting new group data with deploy flag")
             deploy_response = self.session.post(
                 f"{self.api_server}/groups/{group_id}",
-                json=updated_group_data,
+                json=new_group_data,
                 params={"token": self.token},
                 timeout=10,
             )
             deploy_response.raise_for_status()
             deploy_data = deploy_response.json()
             if deploy_data.get("success"):
-                _LOGGER.info("Successfully deployed playlist for group %s", group_id)
+                _LOGGER.info("Successfully deployed updated group data for group %s", group_id)
             else:
-                _LOGGER.error("Failed to deploy playlist for group %s: %s", group_id, deploy_data.get("stat_message", "Unknown error"))
+                _LOGGER.error("Failed to deploy updated group data for group %s: %s", group_id, deploy_data.get("stat_message", "Unknown error"))
 
             return deploy_data
         except requests.exceptions.RequestException as ex:
@@ -510,8 +523,7 @@ class PiSignageDataUpdateCoordinator(DataUpdateCoordinator):
         )
         self.api = api
         self.playlists = []
-        _LOGGER.debug("Initialized PiSignage data coordinator with %d second update interval", 
-                     SCAN_INTERVAL_SECONDS)
+        _LOGGER.debug("Initialized PiSignage data coordinator with %d second update interval", SCAN_INTERVAL_SECONDS)
 
     async def _async_update_data(self):
         """Fetch data from PiSignage."""
