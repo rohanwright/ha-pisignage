@@ -413,14 +413,14 @@ class PiSignageAPI:
 
     def update_group_playlist(self, group_id, playlist_name):
         """Update the default playlist for a group."""
-        _LOGGER.debug("Starting update_group_playlist for group %s with playlist %s", group_id, playlist_name)
+        _LOGGER.debug("Updating group %s to use playlist %s", group_id, playlist_name)
+        
+        # Ensure authenticated
         if not self.token:
-            _LOGGER.debug("No auth token, re-authenticating")
             self.authenticate()
 
         try:
-            # Step 1: Get the group's data
-            _LOGGER.debug("Fetching group data for group %s", group_id)
+            # Fetch required data
             group_response = self.session.get(
                 f"{self.api_server}/groups/{group_id}",
                 params={"token": self.token},
@@ -428,10 +428,7 @@ class PiSignageAPI:
             )
             group_response.raise_for_status()
             group_data = group_response.json().get("data", {})
-            _LOGGER.debug("Fetched group data: %s", group_data)
-
-            # Step 2: Get all playlists data
-            _LOGGER.debug("Fetching all playlists data")
+            
             playlists_response = self.session.get(
                 f"{self.api_server}/playlists",
                 params={"token": self.token},
@@ -439,74 +436,73 @@ class PiSignageAPI:
             )
             playlists_response.raise_for_status()
             all_playlists = playlists_response.json().get("data", [])
-            _LOGGER.debug("Fetched %d playlists", len(all_playlists))
-
-            # Step 3: Find the playlist data for the specified playlist_name
-            _LOGGER.debug("Finding playlist data for playlist %s", playlist_name)
+            
+            # Find target playlist
             target_playlist = next(
-                (playlist for playlist in all_playlists if playlist.get("name") == playlist_name), None
+                (p for p in all_playlists if p.get("name") == playlist_name), None
             )
             if not target_playlist:
-                _LOGGER.error("Playlist %s not found", playlist_name)
-                return {"success": False, "stat_message": f"Playlist {playlist_name} not found"}
-            _LOGGER.debug("Found target playlist data: %s", target_playlist)
-
-            # Step 4: Replace the first playlist in the group's playlists data
+                _LOGGER.error("Playlist '%s' not found", playlist_name)
+                return {"success": False, "stat_message": f"Playlist '{playlist_name}' not found"}
+            
+            # Update group's playlist list
+            new_playlist_entry = {
+                "name": target_playlist.get("name"),
+                "settings": target_playlist.get("settings", {})
+            }
+            
             group_playlists = group_data.get("playlists", [])
             if group_playlists:
-                group_playlists[0] = {
-                    "name": target_playlist.get("name"),
-                    "settings": target_playlist.get("settings", {})
-                }
+                group_playlists[0] = new_playlist_entry
             else:
-                group_playlists = [{
-                    "name": target_playlist.get("name"),
-                    "settings": target_playlist.get("settings", {})
-                }]
-            _LOGGER.debug("Updated group playlists: %s", group_playlists)
-
-            # Step 5: Generate a new array of all asset names across the playlists
-            _LOGGER.debug("Generating asset names array from updated playlists")
+                group_playlists = [new_playlist_entry]
+            
+            # Collect assets from all playlists used by this group
+            playlist_names = {pl.get("name") for pl in group_playlists}
             asset_names = set()
+            
             for playlist in all_playlists:
-                if playlist.get("name") in [pl.get("name") for pl in group_playlists]:
-                    for asset in playlist.get("assets", []):
-                        if "filename" in asset:
-                            asset_names.add(asset["filename"])
-                    # Add the "__playListName.json" asset for the playlist
+                if playlist.get("name") in playlist_names:
+                    # Add asset filenames
+                    asset_names.update(
+                        asset["filename"] for asset in playlist.get("assets", [])
+                        if "filename" in asset
+                    )
+                    
+                    # Add playlist JSON file
                     asset_names.add(f"__{playlist.get('name')}.json")
-                    # Add the templateName if it exists
-                    if template_name := playlist.get("templateName"):
-                        asset_names.add(template_name)
-            asset_names = list(asset_names)
-            _LOGGER.debug("Generated asset names: %s", asset_names)
-
-            # Step 6: Create a new group data object
-            new_group_data = {
+                    
+                    # Add template if present
+                    if template := playlist.get("templateName"):
+                        asset_names.add(template)
+            
+            # Prepare and send update
+            update_data = {
                 "playlists": group_playlists,
-                "assets": asset_names,
+                "assets": list(asset_names),
                 "deploy": True
             }
-            _LOGGER.debug("Created new group data: %s", new_group_data)
-
-            # Step 7: POST the new group data
-            _LOGGER.debug("Posting new group data with deploy flag")
+            
             deploy_response = self.session.post(
                 f"{self.api_server}/groups/{group_id}",
-                json=new_group_data,
+                json=update_data,
                 params={"token": self.token},
                 timeout=10,
             )
             deploy_response.raise_for_status()
-            deploy_data = deploy_response.json()
-            if deploy_data.get("success"):
-                _LOGGER.info("Successfully deployed updated group data for group %s", group_id)
+            result = deploy_response.json()
+            
+            if result.get("success"):
+                _LOGGER.info("Successfully updated group %s to use playlist '%s'", 
+                             group_id, playlist_name)
             else:
-                _LOGGER.error("Failed to deploy updated group data for group %s: %s", group_id, deploy_data.get("stat_message", "Unknown error"))
-
-            return deploy_data
+                _LOGGER.error("Failed to update group %s: %s", 
+                              group_id, result.get("stat_message", "Unknown error"))
+            
+            return result
+            
         except requests.exceptions.RequestException as ex:
-            _LOGGER.error("Error updating or deploying playlist for group %s: %s", group_id, ex)
+            _LOGGER.error("Error updating playlist for group %s: %s", group_id, ex)
             raise
 
 
