@@ -34,7 +34,9 @@ async def async_setup_entry(hass, entry, async_add_entities):
         
         # Additional sensors
         entities.append(PiSignageMyIpAddressSensor(coordinator, player))
-
+        
+        # Current playlist sensor
+        entities.append(PiSignageCurrentPlaylistSensor(coordinator, player))
     
     async_add_entities(entities, True)
 
@@ -203,3 +205,27 @@ class PiSignageMyIpAddressSensor(PiSignageBaseSensor):
     def name(self) -> str:
         """Return the name of the sensor."""
         return f"{self._player_name} Player IP"
+
+
+class PiSignageCurrentPlaylistSensor(PiSignageBaseSensor):
+    """Representation of a PiSignage current playlist sensor."""
+
+    def __init__(self, coordinator, player):
+        """Initialize the current playlist sensor."""
+        super().__init__(coordinator, player, "current_playlist")
+
+    @property
+    def state(self) -> str:
+        """Return the state of the sensor."""
+        playlist_on = self._player_data.get("playlistOn", False)
+        current_playlist = self._player_data.get("currentPlaylist", "")
+        
+        if not playlist_on or not current_playlist:
+            return "Not Playing"
+        
+        return current_playlist
+
+    @property
+    def name(self) -> str:
+        """Return the name of the sensor."""
+        return f"{self._player_name} Current Playlist"
