@@ -105,12 +105,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     for player in players:
         player_id = player.get("_id")
         player_name = player.get("name", f"Player {player_id}")
+        sw_version = player.get("version", "Unknown")
+        config_location = player.get("configLocation", "Unknown")
         device_registry.async_get_or_create(
             config_entry_id=entry.entry_id,
             identifiers={(DOMAIN, player_id)},
             name=player_name,
             manufacturer="PiSignage",
-            model="PiSignage Player",
+            model=f"PiSignage Player: {config_location}",
+            sw_version=sw_version,
         )
     
     # Store the API and coordinator references

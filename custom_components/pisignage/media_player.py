@@ -84,8 +84,6 @@ class PiSignageMediaPlayer(MediaPlayerEntity):
         return {
             "identifiers": {(DOMAIN, self._player_id)},
             "name": self._name,
-            "manufacturer": "PiSignage",
-            "model": "PiSignage Player",
         }
 
     def _update_sources(self):
