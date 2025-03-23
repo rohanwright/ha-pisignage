@@ -24,10 +24,7 @@ from .const import (
     CONF_USE_SSL,
     SERVER_TYPE_HOSTED,
     SERVER_TYPE_OPEN_SOURCE,
-    SERVER_TYPE_PLAYER,
     DEFAULT_PORT_SERVER,
-    DEFAULT_PORT_PLAYER,
-    DEFAULT_PATH,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -39,60 +36,57 @@ class PiSignageConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
     CONNECTION_CLASS = config_entries.CONN_CLASS_LOCAL_POLL
 
-    async def async_step_user(
-        self, user_input: Optional[Dict[str, Any]] = None
-    ) -> FlowResult:
-        """Handle the initial step."""
+    async def async_step_user(self, user_input: Optional[Dict[str, Any]] = None) -> FlowResult:
+        """Handle the initial step to select server type."""
         errors = {}
 
         if user_input is not None:
-            # Process the selected server type
-            server_type = user_input[CONF_SERVER_TYPE]
+            self.context["server_type"] = user_input[CONF_SERVER_TYPE]
+            return await self.async_step_server_details()
+
+        return self.async_show_form(
+            step_id="user",
+            data_schema=vol.Schema({
+                vol.Required(CONF_SERVER_TYPE, default=SERVER_TYPE_OPEN_SOURCE): vol.In([
+                    SERVER_TYPE_HOSTED,
+                    SERVER_TYPE_OPEN_SOURCE
+                ])
+            }),
+            errors=errors,
+        )
+
+    async def async_step_server_details(self, user_input: Optional[Dict[str, Any]] = None) -> FlowResult:
+        """Handle the second step to gather server details."""
+        errors = {}
+        server_type = self.context["server_type"]
+
+        if user_input is not None:
             host = user_input[CONF_HOST]
-            use_ssl = user_input.get(CONF_USE_SSL, server_type == SERVER_TYPE_HOSTED)
-            
-            # Set the appropriate port based on server type
-            if server_type == SERVER_TYPE_PLAYER:
-                port = user_input.get(CONF_PORT, DEFAULT_PORT_PLAYER)
-            else:
-                port = user_input.get(CONF_PORT, DEFAULT_PORT_SERVER)
-                
             username = user_input[CONF_USERNAME]
             password = user_input[CONF_PASSWORD]
+            use_ssl = user_input.get(CONF_USE_SSL, server_type == SERVER_TYPE_HOSTED)
+            port = user_input.get(CONF_PORT, DEFAULT_PORT_SERVER)
 
-            _LOGGER.info(
-                "Attempting to set up PiSignage %s at %s", 
-                server_type, 
-                f"{host}:{port}" if server_type != SERVER_TYPE_HOSTED else f"{username}.pisignage.com"
-            )
-
-            # Check if already configured
+            # Set unique ID and check if already configured
             await self.async_set_unique_id(f"{host}_{username}")
             self._abort_if_unique_id_configured()
 
-            # Construct API URL based on server type
+            # Construct API URL
             if server_type == SERVER_TYPE_HOSTED:
-                # For hosted servers, the format is: https://username.pisignage.com/api
-                # Always use HTTPS for hosted servers
-                api_url = f"https://{username}.pisignage.com{DEFAULT_PATH}"
-                _LOGGER.debug("Using hosted server URL: %s", api_url)
+                # Use `host` as the username in the hosted URL
+                api_url = f"https://{host}.pisignage.com/api"
             else:
-                # For open source servers or players
                 protocol = "https" if use_ssl else "http"
-                api_url = f"{protocol}://{host}:{port}{DEFAULT_PATH}"
-                _LOGGER.debug("Using local server URL: %s", api_url)
-                
+                api_url = f"{protocol}://{host}:{port}/api"
+
             # Test connection
             try:
-                _LOGGER.debug("Testing connection to PiSignage server")
                 response = await self.hass.async_add_executor_job(
                     self._test_connection, api_url, username, password
                 )
-                
                 if response and response.get("success"):
-                    _LOGGER.info("Successfully connected to PiSignage server")
                     return self.async_create_entry(
-                        title=f"PiSignage ({host if server_type != SERVER_TYPE_HOSTED else username})",
+                        title=f"PiSignage ({host if server_type != SERVER_TYPE_HOSTED else host})",
                         data={
                             CONF_SERVER_TYPE: server_type,
                             CONF_API_HOST: host,
@@ -103,48 +97,26 @@ class PiSignageConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         },
                     )
                 else:
-                    _LOGGER.error(
-                        "Authentication failed: %s", 
-                        response.get("stat_message", "Unknown error") if response else "No response"
-                    )
                     errors["base"] = "auth_failed"
-            except ConnectionError as ex:
-                _LOGGER.error("Connection error while setting up PiSignage: %s", ex)
+            except ConnectionError:
                 errors["base"] = "cannot_connect"
-            except Timeout as ex:
-                _LOGGER.error("Timeout while setting up PiSignage: %s", ex)
+            except Timeout:
                 errors["base"] = "timeout_connect"
-            except Exception as ex:  # pylint: disable=broad-except
-                _LOGGER.exception("Unexpected exception while setting up PiSignage: %s", ex)
+            except Exception:
                 errors["base"] = "unknown"
 
-        # Show form with server type options
-        server_type_options = [
-            SERVER_TYPE_HOSTED,
-            SERVER_TYPE_OPEN_SOURCE,
-            SERVER_TYPE_PLAYER
-        ]
-        
-        # Prepare the form schema
+        # Prepare schema for server details
         schema = {
-            vol.Required(CONF_SERVER_TYPE, default=SERVER_TYPE_OPEN_SOURCE): vol.In(server_type_options),
             vol.Required(CONF_HOST): str,
             vol.Required(CONF_USERNAME): str,
             vol.Required(CONF_PASSWORD): str,
         }
-        
-        # Conditionally add port and SSL options based on selected server type
-        if user_input is None or user_input.get(CONF_SERVER_TYPE) != SERVER_TYPE_HOSTED:
-            default_port = DEFAULT_PORT_PLAYER if user_input and user_input.get(CONF_SERVER_TYPE) == SERVER_TYPE_PLAYER else DEFAULT_PORT_SERVER
-            schema[vol.Optional(CONF_PORT, default=default_port)] = int
-            
-            # Only add SSL option for non-hosted servers (hosted always uses SSL)
-            if user_input is None or user_input.get(CONF_SERVER_TYPE) != SERVER_TYPE_HOSTED:
-                schema[vol.Optional(CONF_USE_SSL, default=False)] = bool
+        if server_type != SERVER_TYPE_HOSTED:
+            schema[vol.Optional(CONF_PORT, default=DEFAULT_PORT_SERVER)] = int
+            schema[vol.Optional(CONF_USE_SSL, default=False)] = bool
 
-        _LOGGER.debug("Showing PiSignage configuration form")
         return self.async_show_form(
-            step_id="user",
+            step_id="server_details",
             data_schema=vol.Schema(schema),
             errors=errors,
         )

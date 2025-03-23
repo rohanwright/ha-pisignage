@@ -2,15 +2,13 @@
   "config": {
     "step": {
       "user": {
-        "title": "Connect to PiSignage",
-        "description": "Set up your PiSignage integration. Select the type of connection and enter required details.",
+        "title": "Connect to PiSignage Server",
+        "description": "Set up your PiSignage integration. Select the server type and provide the required details.",
         "data": {
-          "server_type": "Connection Type",
-          "host": "Server Hostname/IP or pisignage.com username",
-          "port": "Server Port",
-          "username": "Username/Email",
-          "password": "Password",
-          "use_ssl": "Use SSL (HTTPS)"
+          "host": "Server Hostname/IP or PiSignage.com Username",
+          "port": "Server Port (default: 3000)",
+          "username": "Login Username/Email",
+          "password": "Password"
         }
       }
     },
@@ -28,8 +26,37 @@
     "server_type": {
       "options": {
         "hosted": "Hosted (pisignage.com)",
-        "open_source": "Open Source Server",
-        "player": "Player Direct Connection"
+        "open_source": "Open Source Server"
+      }
+    }
+  },
+  "services": {
+    "play_playlist": {
+      "name": "Play Playlist",
+      "description": "Start playing a specific playlist on a PiSignage player.",
+      "fields": {
+        "entity_id": {
+          "name": "Player",
+          "description": "The PiSignage player to control."
+        },
+        "playlist": {
+          "name": "Playlist",
+          "description": "Name of the playlist to play."
+        }
+      }
+    },
+    "tv_control": {
+      "name": "TV Control",
+      "description": "Turn on or off the TV connected to the PiSignage player.",
+      "fields": {
+        "entity_id": {
+          "name": "Player",
+          "description": "The PiSignage player to control."
+        },
+        "status": {
+          "name": "Status",
+          "description": "Set to 'on' or 'off'."
+        }
       }
     }
   }

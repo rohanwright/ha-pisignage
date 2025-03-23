@@ -1,14 +1,13 @@
 # PiSignage Home Assistant Integration
 
-This custom component integrates PiSignage with Home Assistant, allowing you to control your digital signage displays as media players within your smart home.
+A Custom Integration for Home Assistant to connect with PiSignage Server (Open Source or Hosted PiSignage.com)
 
 ## Features
 
-- Control PiSignage players (play, pause, next/previous track)
-- Switch between playlists
-- Power on/off connected TVs
-- View player status, temperature, and storage information
-- Easy configuration through Home Assistant UI
+- Control PiSignage players
+- Switch between playlists (Will Switch the default playlist for the group)
+- Power on/off connected TVs with CEC
+- Sensors for player data
 
 ## Installation
 
@@ -33,28 +32,29 @@ This custom component integrates PiSignage with Home Assistant, allowing you to 
 1. Go to Home Assistant → Settings → Devices & Services → Add Integration
 2. Search for "PiSignage" and select it
 3. Enter your PiSignage server details:
-   - Host: IP address or hostname of your PiSignage server
-   - Port: Server port (default: 3000)
-   - Username: Your PiSignage username
+   - Host: IP address or hostname of your PiSignage open source server, or the username of your hosted service (<u>username<u>.pisignage.com)
+   - Port: Open Source Server port (default: 3000, Not needed for hosted)
+   - Username: Your PiSignage username or email address
    - Password: Your PiSignage password
 4. Click "Submit" to connect
 
 ## Available Entities
 
-For each PiSignage player, the integration creates:
+For each PiSignage player, the integration creates a device with the name of the player. Connected to the device is the following entities:
 
 ### Media Player
 
-- Control the player (play/pause, next/previous track)
-- Select playlists from the source list
-- Turn connected TV on/off
+- Control the current playlist on the player (play/pause, next/previous item in the playlist)
+- Select playlists from the source list which will update the primary playlist within the group and deploy
+- Turn connected TV on/off with CEC if supported
 
 ### Sensors
 
 - **Status**: Shows the current player status
-- **Temperature**: Reports the device temperature (if available)
-- **Storage**: Shows available storage space
-- **Uptime**: Shows how long the player has been running
+- **CurrentPlalist**: Reports the device temperature (if available)
+- **Storage**: Shows used storage space
+- **Player IP**: The local IP address of the player
+- **Location**: The configured location in PiSignage
 
 ## Services
 

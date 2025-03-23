@@ -20,8 +20,6 @@ SERVER_TYPE_OPEN_SOURCE = "open_source"
 SERVER_TYPE_PLAYER = "player"
 
 DEFAULT_PORT_SERVER = 3000
-DEFAULT_PORT_PLAYER = 8000
-DEFAULT_PATH = "/api"
 
 # Platform types
 MEDIA_PLAYER = "media_player"
