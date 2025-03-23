@@ -8,6 +8,6 @@
   "requirements": ["requests>=2.25.1"],
   "integration_type": "hub",
   "iot_class": "cloud_polling",
-  "version": "0.5.1-alpha",
+  "version": "1.0.0",
   "config_flow": true
 }

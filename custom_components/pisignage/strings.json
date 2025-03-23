@@ -5,7 +5,9 @@
         "title": "Select Server Type",
         "description": "Are you using the hosted service at PiSignage.com or the open source server?",
         "data": {
-          "server_type": "Server Type"
+          "server_type": "Server Type",
+          "server_type_hosted": "Hosted (pisignage.com)",
+          "server_type_open_source": "Open Source Server"
         }
       },
       "server_details": {
