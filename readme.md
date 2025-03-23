@@ -32,7 +32,7 @@ A Custom Integration for Home Assistant to connect with PiSignage Server (Open S
 1. Go to Home Assistant → Settings → Devices & Services → Add Integration
 2. Search for "PiSignage" and select it
 3. Enter your PiSignage server details:
-   - Host: IP address or hostname of your PiSignage open source server, or the username of your hosted service (<u>username<u>.pisignage.com)
+   - Host: IP address or hostname of your PiSignage open source server, or the username of your hosted service (<u>username</u>.pisignage.com)
    - Port: Open Source Server port (default: 3000, Not needed for hosted)
    - Username: Your PiSignage username or email address
    - Password: Your PiSignage password
