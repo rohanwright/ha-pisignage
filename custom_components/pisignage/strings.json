@@ -2,13 +2,21 @@
   "config": {
     "step": {
       "user": {
-        "title": "Connect to PiSignage Server",
-        "description": "Set up your PiSignage integration. Select the server type and provide the required details.",
+        "title": "Select Server Type",
+        "description": "Are you using the hosted service at PiSignage.com or the open source server?",
+        "data": {
+          "server_type": "Server Type"
+        }
+      },
+      "server_details": {
+        "title": "Enter Server Details",
+        "description": "Provide the connection details for your PiSignage server.",
         "data": {
           "host": "Server Hostname/IP or PiSignage.com Username",
           "port": "Server Port (default: 3000)",
           "username": "Login Username/Email",
-          "password": "Password"
+          "password": "Password",
+          "use_ssl": "Use SSL (HTTPS)"
         }
       }
     },
@@ -33,7 +41,7 @@
   "services": {
     "play_playlist": {
       "name": "Play Playlist",
-      "description": "Start playing a specific playlist on a PiSignage player.",
+      "description": "Start playing a specific playlist on the group the player is accociated with.",
       "fields": {
         "entity_id": {
           "name": "Player",
