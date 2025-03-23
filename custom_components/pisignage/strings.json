@@ -3,11 +3,11 @@
     "step": {
       "user": {
         "title": "Connect to PiSignage Server",
-        "description": "Set up your PiSignage integration. You need the server IP address and your authentication credentials.",
+        "description": "Set up your PiSignage integration. Select the server type and provide the required details.",
         "data": {
-          "host": "Server Hostname or IP",
+          "host": "Server Hostname/IP or PiSignage.com Username",
           "port": "Server Port (default: 3000)",
-          "username": "Username",
+          "username": "Login Username/Email",
           "password": "Password"
         }
       }
@@ -20,6 +20,14 @@
     },
     "abort": {
       "already_configured": "This PiSignage server is already configured"
+    }
+  },
+  "selector": {
+    "server_type": {
+      "options": {
+        "hosted": "Hosted (pisignage.com)",
+        "open_source": "Open Source Server"
+      }
     }
   },
   "services": {

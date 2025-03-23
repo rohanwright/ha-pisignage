@@ -27,9 +27,7 @@ from .const import (
     CONF_USE_SSL,
     SERVER_TYPE_HOSTED,
     SERVER_TYPE_OPEN_SOURCE,
-    SERVER_TYPE_PLAYER,
     DEFAULT_PORT_SERVER,
-    DEFAULT_PORT_PLAYER,
     MEDIA_PLAYER,
     SENSOR,
     SCAN_INTERVAL_SECONDS,
@@ -59,20 +57,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Configure API endpoint based on server type
     if server_type == SERVER_TYPE_HOSTED:
         # For hosted servers, format is: https://username.pisignage.com/api
-        username = entry.data[CONF_USERNAME]
-        # Always use HTTPS for hosted servers
-        api_server = f"https://{username}.pisignage.com/api"
+        api_server = f"https://{api_host}.pisignage.com/api"
         _LOGGER.info("Connecting to hosted PiSignage server: %s", api_server)
     else:
-        # For open source servers or players
-        protocol = "https" if use_ssl else "http"
-        if server_type == SERVER_TYPE_PLAYER:
-            api_port = entry.data.get(CONF_API_PORT, DEFAULT_PORT_PLAYER)
-            _LOGGER.info("Connecting directly to PiSignage player at %s:%s", api_host, api_port)
-        else:
-            api_port = entry.data.get(CONF_API_PORT, DEFAULT_PORT_SERVER)
-            _LOGGER.info("Connecting to PiSignage open source server at %s:%s", api_host, api_port)
+        # For open source servers
+        api_port = entry.data.get(CONF_API_PORT, DEFAULT_PORT_SERVER)
         api_server = f"{protocol}://{api_host}:{api_port}/api"
+        _LOGGER.info("Connecting to PiSignage open source server at %s:%s", api_host, api_port)
     
     username = entry.data[CONF_USERNAME]
     password = entry.data[CONF_PASSWORD]
