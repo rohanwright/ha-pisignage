@@ -72,11 +72,19 @@ class PiSignageMediaPlayer(MediaPlayerEntity):
         self._player_id = player.get("_id")
         self._name = player.get("name", f"PiSignage Player {self._player_id}")
         self._unique_id = f"pisignage_{self._player_id}"
-        self._player_data = player
         self._available = True
         self._sources = []
         self._update_sources()
+        # Register to coordinator
+        coordinator.async_add_listener(self._update_sources)
+        self._attr_should_poll = False
         _LOGGER.debug("Initialized PiSignage media player entity: %s", self._name)
+
+    async def async_added_to_hass(self):
+        """When entity is added to hass."""
+        self.async_on_remove(
+            self.coordinator.async_add_listener(self.async_write_ha_state)
+        )
 
     @property
     def device_info(self):
@@ -106,17 +114,30 @@ class PiSignageMediaPlayer(MediaPlayerEntity):
     @property
     def available(self) -> bool:
         """Return if entity is available."""
-        return self._available and self.coordinator.last_update_success
+        # Get player data from coordinator directly
+        players = self.coordinator.data.get(CONF_PLAYERS, [])
+        player_found = any(p.get("_id") == self._player_id for p in players)
+        return player_found and self.coordinator.last_update_success
+
+    @property
+    def _player_data(self):
+        """Get the latest player data from the coordinator."""
+        for player in self.coordinator.data.get(CONF_PLAYERS, []):
+            if player.get("_id") == self._player_id:
+                return player
+        return {}
 
     @property
     def state(self) -> str:
         """Return the state of the device."""
-        if not self._player_data.get("isConnected", False):
+        player_data = self._player_data
+        
+        if not player_data.get("isConnected", False):
             return STATE_OFF
 
-        is_cec_supported = self._player_data.get("isCecSupported", False)
-        cec_tv_status = self._player_data.get("cecTvStatus", False)
-        playlist_on = self._player_data.get("playlistOn", False)
+        is_cec_supported = player_data.get("isCecSupported", False)
+        cec_tv_status = player_data.get("cecTvStatus", False)
+        playlist_on = player_data.get("playlistOn", False)
 
         if not is_cec_supported:
             if playlist_on:
@@ -159,18 +180,19 @@ class PiSignageMediaPlayer(MediaPlayerEntity):
     @property
     def extra_state_attributes(self) -> Dict[str, Any]:
         """Return the state attributes."""
+        player_data = self._player_data
         attrs = {}
         
-        if playlists := self._player_data.get("playlists"):
+        if playlists := player_data.get("playlists"):
             attrs[ATTR_PLAYLISTS] = playlists
             
-        if group := self._player_data.get("group"):
+        if group := player_data.get("group"):
             attrs[ATTR_GROUP] = group
             
-        if status := self._player_data.get("status"):
+        if status := player_data.get("status"):
             attrs[ATTR_STATUS] = status
         
-        status_data = self._player_data.get("statusData", {})
+        status_data = player_data.get("statusData", {})
         
         if playlist := status_data.get("playlistPlaying"):
             attrs[ATTR_CURRENT_PLAYLIST] = playlist
@@ -178,25 +200,12 @@ class PiSignageMediaPlayer(MediaPlayerEntity):
         if current_file := status_data.get("currentPlay", {}).get("filename"):
             attrs[ATTR_CURRENT_FILE] = current_file
         
-        if tv_status := self._player_data.get("tvStatus"):
+        if tv_status := player_data.get("tvStatus"):
             attrs[ATTR_TV_STATUS] = "On" if tv_status == "1" else "Off"
             
         return attrs
 
-    async def async_update(self) -> None:
-        """Update the player data."""
-        await self.coordinator.async_request_refresh()
-        players = self.coordinator.data.get(CONF_PLAYERS, [])
-        
-        for player in players:
-            if player.get("_id") == self._player_id:
-                self._player_data = player
-                self._available = True
-                self._update_sources()
-                return
-        
-        _LOGGER.warning("Player %s not found in updated data", self._name)
-        self._available = False
+    # Remove the async_update method - coordinator handles updates
 
     async def async_turn_on(self) -> None:
         """Turn the device on."""

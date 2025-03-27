@@ -51,12 +51,29 @@ class PiSignageBaseSensor(SensorEntity):
         """Initialize the base sensor."""
         self.coordinator = coordinator
         self._player_id = player.get("_id")
-        self._player_data = player
         self._sensor_type = sensor_type
         self._unique_id = f"pisignage_{self._player_id}_{sensor_type}"
         self._player_name = player.get("name", f"PiSignage Player {self._player_id}")
         self._name = f"{self._player_name} {sensor_type.capitalize()}"
-        self._available = True
+        
+        # Register to coordinator updates
+        self.coordinator = coordinator
+        self._attr_should_poll = False
+        self._attr_available = True
+
+    async def async_added_to_hass(self):
+        """When entity is added to hass."""
+        self.async_on_remove(
+            self.coordinator.async_add_listener(self.async_write_ha_state)
+        )
+
+    @property
+    def _player_data(self):
+        """Get the latest player data from the coordinator."""
+        for player in self.coordinator.data.get(CONF_PLAYERS, []):
+            if player.get("_id") == self._player_id:
+                return player
+        return {}
 
     @property
     def device_info(self):
@@ -79,20 +96,12 @@ class PiSignageBaseSensor(SensorEntity):
     @property
     def available(self) -> bool:
         """Return if entity is available."""
-        return self._available and self.coordinator.last_update_success
-
-    async def async_update(self) -> None:
-        """Update the sensor."""
-        await self.coordinator.async_request_refresh()
+        # Check if the player exists in coordinator data
         players = self.coordinator.data.get(CONF_PLAYERS, [])
-        
-        for player in players:
-            if player.get("_id") == self._player_id:
-                self._player_data = player
-                self._available = True
-                return
-                
-        self._available = False
+        player_found = any(p.get("_id") == self._player_id for p in players)
+        return player_found and self.coordinator.last_update_success
+    
+    # Remove async_update method - we're using coordinator
 
 
 class PiSignageStatusSensor(PiSignageBaseSensor):
@@ -105,10 +114,11 @@ class PiSignageStatusSensor(PiSignageBaseSensor):
     @property
     def state(self) -> str:
         """Return the state of the sensor."""
-        is_connected = self._player_data.get("isConnected", False)
-        is_cec_supported = self._player_data.get("isCecSupported", False)
-        cec_tv_status = self._player_data.get("cecTvStatus", False)
-        playlist_on = self._player_data.get("playlistOn", False)
+        player_data = self._player_data
+        is_connected = player_data.get("isConnected", False)
+        is_cec_supported = player_data.get("isCecSupported", False)
+        cec_tv_status = player_data.get("cecTvStatus", False)
+        playlist_on = player_data.get("playlistOn", False)
 
         if not is_connected:
             return "Offline"

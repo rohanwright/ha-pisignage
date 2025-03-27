@@ -562,6 +562,12 @@ class PiSignageDataUpdateCoordinator(DataUpdateCoordinator):
                     _LOGGER.warning("Invalid player data format: %s", player)
             
             _LOGGER.debug("Data update completed successfully with %d players", len(processed_players))
+            
+            # Log more detailed information about the data structure we're returning
+            _LOGGER.debug("Player data structure samples: %s", 
+                        str({p.get("_id"): {k: v for k, v in p.items() if k in ["isConnected", "playlistOn", "currentPlaylist"]}
+                             for p in processed_players[:2]}) if processed_players else "No players")
+            
             return {
                 CONF_PLAYERS: processed_players,
                 "playlists": self.playlists
