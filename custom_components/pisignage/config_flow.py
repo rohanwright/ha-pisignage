@@ -377,6 +377,8 @@ class PiSignageOptionsFlow(config_entries.OptionsFlow):
         players = coordinator.data.get(CONF_PLAYERS, [])
         
         options_schema = {}
+        player_count = 0
+        
         for player in players:
             player_id = player.get("_id")
             player_name = player.get("name", f"Player {player_id}")
@@ -384,18 +386,30 @@ class PiSignageOptionsFlow(config_entries.OptionsFlow):
             # Get current setting for this player or default to False
             current_setting = self.options.get(CONF_IGNORE_CEC, {}).get(player_id, False)
             
-            # Add checkbox option for this player with the player name as description
+            field_name = f"ignore_cec_{player_id}"
+            # Add checkbox option for this player
             options_schema[vol.Optional(
-                f"ignore_cec_{player_id}", 
+                field_name,
                 default=current_setting,
-                description=f"Ignore CEC for {player_name}"
             )] = bool
+            player_count += 1
         
         if not options_schema:
             return self.async_abort(reason="no_players_found")
+        
+        # Create mapping of field names to descriptive names for the UI
+        field_descriptions = {}
+        for player in players:
+            player_id = player.get("_id")
+            player_name = player.get("name", f"Player {player_id}")
+            field_name = f"ignore_cec_{player_id}"
+            field_descriptions[field_name] = f"Ignore CEC for: {player_name}"
 
         return self.async_show_form(
             step_id="init", 
             data_schema=vol.Schema(options_schema),
-            description_placeholders={"players_count": str(len(players))},
+            description_placeholders={
+                "players_count": str(player_count),
+                **field_descriptions
+            },
         )

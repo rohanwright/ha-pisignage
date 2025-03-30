@@ -56,6 +56,9 @@
     },
     "abort": {
       "no_players_found": "No PiSignage players found"
+    },
+    "data_description": {
+      "ignore_cec_": "{field_name}"
     }
   },
   "selector": {
