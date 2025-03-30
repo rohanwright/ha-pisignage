@@ -8,6 +8,7 @@ A Custom Integration for Home Assistant to connect with PiSignage Server (Open S
 - Switch between playlists (Will Switch the default playlist for the group)
 - Power on/off connected TVs with CEC
 - Sensors for player data
+- Two-factor authentication support
 
 ## Installation
 
@@ -36,7 +37,19 @@ A Custom Integration for Home Assistant to connect with PiSignage Server (Open S
    - Port: Open Source Server port (default: 3000, Not needed for hosted)
    - Username: Your PiSignage username or email address
    - Password: Your PiSignage password
-4. Click "Submit" to connect
+4. If two-factor authentication is enabled on your account, you'll be prompted to enter your OTP code
+5. Click "Submit" to connect
+
+## Two-Factor Authentication
+
+This integration supports two-factor authentication (2FA) for PiSignage accounts that have it enabled. If your account has 2FA enabled:
+
+1. During setup, enter your regular credentials first
+2. The system will detect that 2FA is enabled and prompt you for your OTP code
+3. Enter the OTP code from your authentication device/app
+4. After successful verification, the integration will be configured
+
+Note: OTP authentication is only required during initial setup and not for regular operation once the integration is configured.
 
 ## Available Entities
 

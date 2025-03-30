@@ -22,6 +22,7 @@ from .const import (
     CONF_API_PORT,
     CONF_SERVER_TYPE,
     CONF_USE_SSL,
+    CONF_OTP,
     SERVER_TYPE_HOSTED,
     SERVER_TYPE_OPEN_SOURCE,
     DEFAULT_PORT_SERVER,
@@ -35,6 +36,11 @@ class PiSignageConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     VERSION = 1
     CONNECTION_CLASS = config_entries.CONN_CLASS_LOCAL_POLL
+
+    def __init__(self):
+        """Initialize the PiSignage config flow."""
+        self.server_connection_info = {}
+        self.api_url = None
 
     async def async_step_user(self, user_input: Optional[Dict[str, Any]] = None) -> FlowResult:
         """Handle the initial step to select server type."""
@@ -67,6 +73,16 @@ class PiSignageConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             use_ssl = user_input.get(CONF_USE_SSL, server_type == SERVER_TYPE_HOSTED)
             port = user_input.get(CONF_PORT, DEFAULT_PORT_SERVER)
 
+            # Store connection info for later steps
+            self.server_connection_info = {
+                CONF_SERVER_TYPE: server_type,
+                CONF_API_HOST: host,
+                CONF_API_PORT: port,
+                CONF_USERNAME: username,
+                CONF_PASSWORD: password,
+                CONF_USE_SSL: use_ssl,
+            }
+
             # Set unique ID and check if already configured
             await self.async_set_unique_id(f"{host}_{username}")
             self._abort_if_unique_id_configured()
@@ -78,31 +94,59 @@ class PiSignageConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             else:
                 protocol = "https" if use_ssl else "http"
                 api_url = f"{protocol}://{host}:{port}/api"
+                
+            self.api_url = api_url
 
             # Test connection
             try:
                 response = await self.hass.async_add_executor_job(
                     self._test_connection, api_url, username, password
                 )
+                
                 if response and response.get("success"):
                     return self.async_create_entry(
-                        title=f"PiSignage ({host if server_type != SERVER_TYPE_HOSTED else host})",
-                        data={
-                            CONF_SERVER_TYPE: server_type,
-                            CONF_API_HOST: host,
-                            CONF_API_PORT: port,
-                            CONF_USERNAME: username,
-                            CONF_PASSWORD: password,
-                            CONF_USE_SSL: use_ssl,
-                        },
+                        title=f"PiSignage ({host})",
+                        data=self.server_connection_info,
                     )
+                elif response and response.get("message") == "OTP needed":
+                    # OTP is required, proceed to OTP step
+                    return await self.async_step_otp()
                 else:
+                    # Any other response is treated as authentication failure
+                    error_message = response.get("message", "") if response else ""
+                    _LOGGER.error("Authentication failed: %s", error_message)
                     errors["base"] = "auth_failed"
             except ConnectionError:
                 errors["base"] = "cannot_connect"
             except Timeout:
                 errors["base"] = "timeout_connect"
-            except Exception:
+            except HTTPError as http_err:
+                if http_err.response.status_code == 401:
+                    # Try to parse the response to check for OTP requirement or other error
+                    try:
+                        error_data = http_err.response.json()
+                        _LOGGER.debug("401 response content: %s", error_data)
+                        
+                        if error_data.get("message") == "OTP needed":
+                            # OTP is required, proceed to OTP step
+                            return await self.async_step_otp()
+                        else:
+                            # Handle specific error messages
+                            error_message = error_data.get("message", "")
+                            if "not registered" in error_message.lower():
+                                errors["base"] = "invalid_user"
+                            elif "incorrect password" in error_message.lower():
+                                errors["base"] = "invalid_password"
+                            else:
+                                errors["base"] = "auth_failed"
+                            _LOGGER.error("Authentication error: %s", error_message)
+                    except Exception as ex:
+                        _LOGGER.error("Error parsing 401 response: %s", str(ex))
+                        errors["base"] = "auth_failed"
+                else:
+                    errors["base"] = "unknown"
+            except Exception as ex:
+                _LOGGER.error("Unexpected error: %s", str(ex))
                 errors["base"] = "unknown"
 
         # Prepare schema for server details
@@ -118,6 +162,46 @@ class PiSignageConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="server_details",
             data_schema=vol.Schema(schema),
+            errors=errors,
+        )
+        
+    async def async_step_otp(self, user_input: Optional[Dict[str, Any]] = None) -> FlowResult:
+        """Handle OTP verification step."""
+        errors = {}
+
+        if user_input is not None:
+            otp_code = user_input[CONF_OTP]
+            
+            try:
+                # Try authentication again with OTP code
+                response = await self.hass.async_add_executor_job(
+                    self._test_connection_with_otp, 
+                    self.api_url,
+                    self.server_connection_info[CONF_USERNAME],
+                    self.server_connection_info[CONF_PASSWORD],
+                    otp_code
+                )
+                
+                if response and response.get("success"):
+                    return self.async_create_entry(
+                        title=f"PiSignage ({self.server_connection_info[CONF_API_HOST]})",
+                        data=self.server_connection_info,
+                    )
+                else:
+                    error_message = response.get("message", "") if response else ""
+                    _LOGGER.error("OTP authentication failed: %s", error_message)
+                    errors["base"] = "otp_failed"
+            except (ConnectionError, HTTPError, Timeout):
+                errors["base"] = "cannot_connect"
+            except Exception as ex:
+                _LOGGER.error("Unexpected error during OTP verification: %s", str(ex))
+                errors["base"] = "unknown"
+
+        return self.async_show_form(
+            step_id="otp",
+            data_schema=vol.Schema({
+                vol.Required(CONF_OTP): str,
+            }),
             errors=errors,
         )
 
@@ -147,18 +231,18 @@ class PiSignageConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             
             _LOGGER.debug("Got response status code: %s", response.status_code)
             
-            # Log headers for debugging
-            _LOGGER.debug("Response headers: %s", dict(response.headers))
-            
-            # Check for non-200 status code
-            response.raise_for_status()
-            
-            # Try to decode JSON
+            # Try to decode JSON regardless of status code to handle error messages
             try:
                 result = response.json()
+                _LOGGER.debug("Response content: %s", result)
                 
-                # Log full response for debugging
-                _LOGGER.debug("Full response: %s", result)
+                # Special handling for OTP required
+                if response.status_code == 401 and result.get("message") == "OTP needed":
+                    _LOGGER.debug("OTP authentication required")
+                    return result
+                    
+                # Check for non-200 status code after handling special cases
+                response.raise_for_status()
                 
                 # Check for successful response - either a "success" field or presence of token
                 if result.get("token"):
@@ -188,4 +272,58 @@ class PiSignageConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         except requests.exceptions.RequestException as ex:
             _LOGGER.error("Request error to PiSignage server: %s", str(ex))
             _LOGGER.debug("Response content: %s", response.text if 'response' in locals() else "No response")
+            raise
+            
+    def _test_connection_with_otp(self, api_url, username, password, otp_code):
+        """Test connection to PiSignage with OTP code and return authentication token."""
+        session_url = f"{api_url}/session"
+        _LOGGER.debug("Testing PiSignage connection with OTP to: %s", session_url)
+        
+        try:
+            session = requests.Session()
+            
+            # Format authentication payload with OTP code
+            auth_payload = {
+                "email": username,
+                "password": password,
+                "code": otp_code,  # Add OTP code to payload
+                "getToken": True
+            }
+            
+            _LOGGER.debug("Sending authentication request with OTP and payload: %s", 
+                         {**auth_payload, "password": "***REDACTED***", "code": "***REDACTED***"})
+            
+            response = session.post(
+                session_url,
+                json=auth_payload,
+                timeout=10,
+            )
+            
+            _LOGGER.debug("Got response status code: %s", response.status_code)
+            
+            # Try to decode JSON regardless of status code
+            try:
+                result = response.json()
+                _LOGGER.debug("OTP auth response content: %s", result)
+                
+                # Check for non-200 status code after parsing JSON
+                response.raise_for_status()
+                
+                # Check for successful response - either a "success" field or presence of token
+                if result.get("token"):
+                    _LOGGER.debug("Authentication with OTP successful, token found in response")
+                    # Create a compatible response structure
+                    return {"success": True, "data": {"token": result.get("token")}}
+                else:
+                    _LOGGER.error("Authentication with OTP failed")
+                    return {"success": False, "stat_message": "OTP authentication failed",
+                           "message": result.get("message", "Unknown error")}
+            except ValueError as ex:
+                # Handle case where response isn't JSON
+                _LOGGER.error("OTP Response isn't valid JSON: %s", str(ex))
+                _LOGGER.debug("OTP Response content: %s", response.text)
+                raise
+                
+        except Exception as ex:
+            _LOGGER.error("Error in OTP authentication: %s", str(ex))
             raise

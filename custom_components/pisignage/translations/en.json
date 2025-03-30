@@ -20,12 +20,22 @@
           "password": "Password",
           "use_ssl": "Use SSL (HTTPS)"
         }
+      },
+      "otp": {
+        "title": "Two-Factor Authentication",
+        "description": "Enter the OTP code from your authentication device.",
+        "data": {
+          "otp": "OTP Code"
+        }
       }
     },
     "error": {
       "cannot_connect": "Failed to connect to the server",
       "auth_failed": "Authentication failed, check your credentials",
+      "invalid_user": "This username/email is not registered or active",
+      "invalid_password": "Incorrect password",
       "timeout_connect": "Connection timed out",
+      "otp_failed": "Invalid OTP code, please try again",
       "unknown": "Unexpected error"
     },
     "abort": {
