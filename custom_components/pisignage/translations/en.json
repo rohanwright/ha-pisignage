@@ -46,16 +46,16 @@
     "step": {
       "init": {
         "title": "PiSignage Players ({players_count})",
-        "description": "Configure options for each PiSignage player below."
+        "description": "Configure options for PiSignage below.",
+        "data": {
+          "ignore_cec": "Select players to ignore CEC functionality"
+        }
       }
     },
     "error": {
     },
     "abort": {
       "no_players_found": "No PiSignage players found"
-    },
-    "data_description": {
-      "ignore_cec_": "{field_name}"
     }
   },
   "selector": {

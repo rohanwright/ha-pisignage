@@ -353,6 +353,7 @@ class PiSignageOptionsFlow(config_entries.OptionsFlow):
 
     def __init__(self, config_entry):
         """Initialize options flow."""
+        # No need to store config_entry directly - done automatically by OptionsFlow
         self.options = dict(config_entry.options)
         # Initialize ignore_cec dictionary if it doesn't exist
         if CONF_IGNORE_CEC not in self.options:
@@ -361,12 +362,19 @@ class PiSignageOptionsFlow(config_entries.OptionsFlow):
     async def async_step_init(self, user_input=None):
         """Handle options flow."""
         if user_input is not None:
-            # Process user input
+            # Process user input from the multi-select
             new_ignore_cec = {}
-            for key, value in user_input.items():
-                if key.startswith("ignore_cec_"):
-                    player_id = key[len("ignore_cec_"):]
-                    new_ignore_cec[player_id] = value
+            selected_players = user_input.get(CONF_IGNORE_CEC, [])
+            
+            # Get all players from coordinator to process all players (both selected and unselected)
+            coordinator = self.hass.data[DOMAIN][self.config_entry.entry_id]["coordinator"]
+            players = coordinator.data.get(CONF_PLAYERS, [])
+            
+            # Set the ignore_cec value to True for selected players, False otherwise
+            for player in players:
+                player_id = player.get("_id")
+                # If player_id is in the selected list, set to True, otherwise False
+                new_ignore_cec[player_id] = player_id in selected_players
             
             self.options[CONF_IGNORE_CEC] = new_ignore_cec
             return self.async_create_entry(title="", data=self.options)
@@ -375,38 +383,32 @@ class PiSignageOptionsFlow(config_entries.OptionsFlow):
         coordinator = self.hass.data[DOMAIN][self.config_entry.entry_id]["coordinator"]
         players = coordinator.data.get(CONF_PLAYERS, [])
         
-        # Create a more descriptive schema with player names directly in the field keys
-        options_schema = {}
-        
         if not players:
             return self.async_abort(reason="no_players_found")
         
-        # Sort players by name for a better user experience
-        sorted_players = sorted(players, key=lambda p: p.get("name", ""))
-        player_count = len(sorted_players)
-        
-        # Create a title that shows the count of players found
-        title = f"Configure {player_count} PiSignage Player{'s' if player_count > 1 else ''}"
-        
-        for player in sorted_players:
+        # Create a dictionary of player ID -> player name for the multi_select
+        player_dict = {}
+        for player in players:
             player_id = player.get("_id")
             player_name = player.get("name", f"Player {player_id}")
-            
-            # Get current setting for this player or default to False
-            current_setting = self.options.get(CONF_IGNORE_CEC, {}).get(player_id, False)
-            
-            # The key change: using the player name directly in the field name for display
-            field_key = f"ignore_cec_{player_id}"
-            
-            # Add checkbox with explicit name in the label
-            options_schema[vol.Optional(
-                field_key, 
-                default=current_setting,
-                description=f"{player_name}"  # This will show up in the UI
-            )] = bool
+            player_dict[player_id] = player_name
+        
+        # Get list of player IDs where ignore_cec is currently True
+        current_selections = [
+            player_id 
+            for player_id, ignore in self.options.get(CONF_IGNORE_CEC, {}).items() 
+            if ignore
+        ]
+        
+        import homeassistant.helpers.config_validation as cv
         
         return self.async_show_form(
             step_id="init", 
-            data_schema=vol.Schema(options_schema),
+            data_schema=vol.Schema({
+                vol.Optional(
+                    CONF_IGNORE_CEC,
+                    default=current_selections,
+                ): cv.multi_select(player_dict),
+            }),
             description_placeholders={"players_count": str(len(players))},
         )
