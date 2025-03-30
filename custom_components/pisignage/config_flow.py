@@ -15,6 +15,7 @@ from homeassistant.const import (
     CONF_PASSWORD,
 )
 from homeassistant.data_entry_flow import FlowResult
+from homeassistant.helpers import selector
 
 from .const import (
     DOMAIN,
@@ -50,14 +51,24 @@ class PiSignageConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self.context["server_type"] = user_input[CONF_SERVER_TYPE]
             return await self.async_step_server_details()
 
+        # Use selector.select instead of vol.In() for proper translation
+        schema = vol.Schema({
+            vol.Required(CONF_SERVER_TYPE, default=SERVER_TYPE_OPEN_SOURCE): 
+                selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=[
+                            SERVER_TYPE_HOSTED,
+                            SERVER_TYPE_OPEN_SOURCE,
+                        ],
+                        translation_key="server_type",
+                        mode=selector.SelectSelectorMode.LIST,
+                    )
+                ),
+        })
+
         return self.async_show_form(
             step_id="user",
-            data_schema=vol.Schema({
-                vol.Required(CONF_SERVER_TYPE, default=SERVER_TYPE_OPEN_SOURCE): vol.In([
-                    SERVER_TYPE_HOSTED,
-                    SERVER_TYPE_OPEN_SOURCE
-                ])
-            }),
+            data_schema=schema,
             errors=errors,
         )
 

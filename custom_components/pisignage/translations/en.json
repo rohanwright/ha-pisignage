@@ -53,7 +53,7 @@
   "services": {
     "play_playlist": {
       "name": "Play Playlist",
-      "description": "Start playing a specific playlist on the group the player is accociated with.",
+      "description": "Start playing a specific playlist on the group the player is associated with.",
       "fields": {
         "entity_id": {
           "name": "Player",
