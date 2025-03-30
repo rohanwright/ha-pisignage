@@ -56,7 +56,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
     for player in players:
         player_id = player.get("_id")
         player_name = player.get("name", f"Player {player_id}")
-        entities.append(PiSignageMediaPlayer(coordinator, api, player))
+        entities.append(PiSignageMediaPlayer(coordinator, api, player, entry))
     
     async_add_entities(entities, True)
     _LOGGER.info("Added %d PiSignage media player entities", len(entities))
@@ -65,7 +65,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
 class PiSignageMediaPlayer(MediaPlayerEntity):
     """Representation of a PiSignage media player."""
 
-    def __init__(self, coordinator, api, player):
+    def __init__(self, coordinator, api, player, config_entry):
         """Initialize the PiSignage media player."""
         self.coordinator = coordinator
         self.api = api
@@ -73,6 +73,7 @@ class PiSignageMediaPlayer(MediaPlayerEntity):
         self._name = player.get("name", f"PiSignage Player {self._player_id}")
         self._unique_id = f"pisignage_{self._player_id}"
         self._available = True
+        self._config_entry = config_entry
         self._sources = []
         self._update_sources()
         # Register to coordinator
@@ -135,7 +136,10 @@ class PiSignageMediaPlayer(MediaPlayerEntity):
         if not player_data.get("isConnected", False):
             return STATE_OFF
 
-        is_cec_supported = player_data.get("isCecSupported", False)
+        # Check if this player has the ignore_cec option enabled
+        ignore_cec = self._config_entry.options.get(CONF_IGNORE_CEC, {}).get(self._player_id, False)
+        
+        is_cec_supported = player_data.get("isCecSupported", False) and not ignore_cec
         cec_tv_status = player_data.get("cecTvStatus", False)
         playlist_on = player_data.get("playlistOn", False)
 

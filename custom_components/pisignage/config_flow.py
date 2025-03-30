@@ -24,6 +24,8 @@ from .const import (
     CONF_SERVER_TYPE,
     CONF_USE_SSL,
     CONF_OTP,
+    CONF_PLAYERS,
+    CONF_IGNORE_CEC,
     SERVER_TYPE_HOSTED,
     SERVER_TYPE_OPEN_SOURCE,
     DEFAULT_PORT_SERVER,
@@ -338,3 +340,62 @@ class PiSignageConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         except Exception as ex:
             _LOGGER.error("Error in OTP authentication: %s", str(ex))
             raise
+            
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry):
+        """Get the options flow for this handler."""
+        return PiSignageOptionsFlow(config_entry)
+
+
+class PiSignageOptionsFlow(config_entries.OptionsFlow):
+    """Handle PiSignage options."""
+
+    def __init__(self, config_entry):
+        """Initialize options flow."""
+        self.config_entry = config_entry
+        self.options = dict(config_entry.options)
+        # Initialize ignore_cec dictionary if it doesn't exist
+        if CONF_IGNORE_CEC not in self.options:
+            self.options[CONF_IGNORE_CEC] = {}
+
+    async def async_step_init(self, user_input=None):
+        """Handle options flow."""
+        if user_input is not None:
+            # Process user input
+            new_ignore_cec = {}
+            for key, value in user_input.items():
+                if key.startswith("ignore_cec_"):
+                    player_id = key[len("ignore_cec_"):]
+                    new_ignore_cec[player_id] = value
+            
+            self.options[CONF_IGNORE_CEC] = new_ignore_cec
+            return self.async_create_entry(title="", data=self.options)
+
+        # Get all players from coordinator
+        coordinator = self.hass.data[DOMAIN][self.config_entry.entry_id]["coordinator"]
+        players = coordinator.data.get(CONF_PLAYERS, [])
+        
+        options_schema = {}
+        for player in players:
+            player_id = player.get("_id")
+            player_name = player.get("name", f"Player {player_id}")
+            
+            # Get current setting for this player or default to False
+            current_setting = self.options.get(CONF_IGNORE_CEC, {}).get(player_id, False)
+            
+            # Add checkbox option for this player with the player name as description
+            options_schema[vol.Optional(
+                f"ignore_cec_{player_id}", 
+                default=current_setting,
+                description=f"Ignore CEC for {player_name}"
+            )] = bool
+        
+        if not options_schema:
+            return self.async_abort(reason="no_players_found")
+
+        return self.async_show_form(
+            step_id="init", 
+            data_schema=vol.Schema(options_schema),
+            description_placeholders={"players_count": str(len(players))},
+        )

@@ -14,6 +14,7 @@ CONF_PLAYERS = "players"
 CONF_PLAYER_ID = "player_id"
 CONF_PLAYER_NAME = "player_name"
 CONF_USE_SSL = "use_ssl"
+CONF_IGNORE_CEC = "ignore_cec"  # New constant for ignoring CEC
 
 # Server types
 SERVER_TYPE_HOSTED = "hosted"

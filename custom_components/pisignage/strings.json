@@ -42,6 +42,22 @@
       "already_configured": "This PiSignage server is already configured"
     }
   },
+  "options": {
+    "step": {
+      "init": {
+        "title": "PiSignage Device Options",
+        "description": "Configure options for each PiSignage player. {players_count} players found.",
+        "data": {
+          "ignore_cec": "Ignore CEC"
+        }
+      }
+    },
+    "error": {
+    },
+    "abort": {
+      "no_players_found": "No PiSignage players found"
+    }
+  },
   "selector": {
     "server_type": {
       "options": {

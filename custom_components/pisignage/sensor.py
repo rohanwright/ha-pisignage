@@ -27,7 +27,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
     
     for player in players:
         # Status sensor
-        entities.append(PiSignageStatusSensor(coordinator, player))
+        entities.append(PiSignageStatusSensor(coordinator, player, entry))
         
         # Storage sensor
         entities.append(PiSignageStorageSensor(coordinator, player))
@@ -107,16 +107,21 @@ class PiSignageBaseSensor(SensorEntity):
 class PiSignageStatusSensor(PiSignageBaseSensor):
     """Representation of a PiSignage status sensor."""
 
-    def __init__(self, coordinator, player):
+    def __init__(self, coordinator, player, config_entry):
         """Initialize the status sensor."""
         super().__init__(coordinator, player, "status")
+        self._config_entry = config_entry
 
     @property
     def state(self) -> str:
         """Return the state of the sensor."""
         player_data = self._player_data
         is_connected = player_data.get("isConnected", False)
-        is_cec_supported = player_data.get("isCecSupported", False)
+        
+        # Check if this player has the ignore_cec option enabled
+        ignore_cec = self._config_entry.options.get(CONF_IGNORE_CEC, {}).get(self._player_id, False)
+        
+        is_cec_supported = player_data.get("isCecSupported", False) and not ignore_cec
         cec_tv_status = player_data.get("cecTvStatus", False)
         playlist_on = player_data.get("playlistOn", False)
 
