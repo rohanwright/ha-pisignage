@@ -123,12 +123,12 @@ class PiSignageStatusSensor(PiSignageBaseSensor):
         if not is_connected:
             return "Offline"
         if not is_cec_supported:
-            return "Playing" if playlist_on else "Not Playing"
+            return "Playing (No CEC)" if playlist_on else "Not Playing (No CEC)"
         if not cec_tv_status:
             return "TV Powered Off"
         if playlist_on:
-            return "Playing (No TV Control)"
-        return "Not Playing (No TV Control)"
+            return "Playing"
+        return "Not Playing"
 
     @property
     def extra_state_attributes(self) -> dict:

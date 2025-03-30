@@ -1,0 +1,32 @@
+blueprint:
+  name: Switch PiSignage Playlist
+  description: Change playlist on one or more PiSignage players.
+  domain: automation
+  input:
+    player_entities:
+      name: Player Entities
+      description: Select one or more PiSignage player entities to control.
+      selector:
+        entity:
+          domain: media_player
+          multiple: true
+          filter:
+            integration: pisignage
+    playlist_source:
+      name: Target Playlist
+      description: The playlist to switch to.
+      selector:
+        entity:
+          domain: media_player
+          integration: pisignage
+        attribute: source_list
+
+action:
+  - repeat:
+      for_each: "{{ input.player_entities }}"
+      sequence:
+        - service: media_player.select_source
+          target:
+            entity_id: "{{ repeat.item }}"
+          data:
+            source: "{{ input.playlist_source }}"

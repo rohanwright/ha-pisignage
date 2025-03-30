@@ -1,0 +1,22 @@
+blueprint:
+  name: Power Off PiSignage Players
+  description: Turn off multiple PiSignage players at once.
+  domain: automation
+  input:
+    player_entities:
+      name: Player Entities
+      description: Select one or more PiSignage player entities to control.
+      selector:
+        entity:
+          domain: media_player
+          multiple: true
+          filter:
+            integration: pisignage
+
+action:
+  - repeat:
+      for_each: "{{ input.player_entities }}"
+      sequence:
+        - service: media_player.turn_off
+          target:
+            entity_id: "{{ repeat.item }}"
