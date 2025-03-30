@@ -353,7 +353,6 @@ class PiSignageOptionsFlow(config_entries.OptionsFlow):
 
     def __init__(self, config_entry):
         """Initialize options flow."""
-        self.config_entry = config_entry
         self.options = dict(config_entry.options)
         # Initialize ignore_cec dictionary if it doesn't exist
         if CONF_IGNORE_CEC not in self.options:
@@ -376,40 +375,38 @@ class PiSignageOptionsFlow(config_entries.OptionsFlow):
         coordinator = self.hass.data[DOMAIN][self.config_entry.entry_id]["coordinator"]
         players = coordinator.data.get(CONF_PLAYERS, [])
         
+        # Create a more descriptive schema with player names directly in the field keys
         options_schema = {}
-        player_count = 0
         
-        for player in players:
+        if not players:
+            return self.async_abort(reason="no_players_found")
+        
+        # Sort players by name for a better user experience
+        sorted_players = sorted(players, key=lambda p: p.get("name", ""))
+        player_count = len(sorted_players)
+        
+        # Create a title that shows the count of players found
+        title = f"Configure {player_count} PiSignage Player{'s' if player_count > 1 else ''}"
+        
+        for player in sorted_players:
             player_id = player.get("_id")
             player_name = player.get("name", f"Player {player_id}")
             
             # Get current setting for this player or default to False
             current_setting = self.options.get(CONF_IGNORE_CEC, {}).get(player_id, False)
             
-            field_name = f"ignore_cec_{player_id}"
-            # Add checkbox option for this player
+            # The key change: using the player name directly in the field name for display
+            field_key = f"ignore_cec_{player_id}"
+            
+            # Add checkbox with explicit name in the label
             options_schema[vol.Optional(
-                field_name,
+                field_key, 
                 default=current_setting,
+                description=f"{player_name}"  # This will show up in the UI
             )] = bool
-            player_count += 1
         
-        if not options_schema:
-            return self.async_abort(reason="no_players_found")
-        
-        # Create mapping of field names to descriptive names for the UI
-        field_descriptions = {}
-        for player in players:
-            player_id = player.get("_id")
-            player_name = player.get("name", f"Player {player_id}")
-            field_name = f"ignore_cec_{player_id}"
-            field_descriptions[field_name] = f"Ignore CEC for: {player_name}"
-
         return self.async_show_form(
             step_id="init", 
             data_schema=vol.Schema(options_schema),
-            description_placeholders={
-                "players_count": str(player_count),
-                **field_descriptions
-            },
+            description_placeholders={"players_count": str(len(players))},
         )

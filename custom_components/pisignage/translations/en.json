@@ -45,11 +45,8 @@
   "options": {
     "step": {
       "init": {
-        "title": "PiSignage Device Options",
-        "description": "Configure options for each PiSignage player. {players_count} players found.",
-        "data": {
-          "ignore_cec": "Ignore CEC"
-        }
+        "title": "PiSignage Players ({players_count})",
+        "description": "Configure options for each PiSignage player below."
       }
     },
     "error": {

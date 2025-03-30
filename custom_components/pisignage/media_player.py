@@ -74,7 +74,7 @@ class PiSignageMediaPlayer(MediaPlayerEntity):
         self._name = player.get("name", f"PiSignage Player {self._player_id}")
         self._unique_id = f"pisignage_{self._player_id}"
         self._available = True
-        self._config_entry = config_entry
+        # We don't store the config_entry directly anymore
         self._sources = []
         self._update_sources()
         # Register to coordinator
@@ -137,8 +137,9 @@ class PiSignageMediaPlayer(MediaPlayerEntity):
         if not player_data.get("isConnected", False):
             return STATE_OFF
 
-        # Check if this player has the ignore_cec option enabled
-        ignore_cec = self._config_entry.options.get(CONF_IGNORE_CEC, {}).get(self._player_id, False)
+        # Get the config entry directly from the hass context
+        config_entry = self.hass.config_entries.async_get_entry(self.registry_entry.config_entry_id)
+        ignore_cec = config_entry.options.get(CONF_IGNORE_CEC, {}).get(self._player_id, False)
         
         is_cec_supported = player_data.get("isCecSupported", False) and not ignore_cec
         cec_tv_status = player_data.get("cecTvStatus", False)

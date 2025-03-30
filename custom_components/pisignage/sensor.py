@@ -111,7 +111,8 @@ class PiSignageStatusSensor(PiSignageBaseSensor):
     def __init__(self, coordinator, player, config_entry):
         """Initialize the status sensor."""
         super().__init__(coordinator, player, "status")
-        self._config_entry = config_entry
+        # We don't need to store the config_entry explicitly anymore
+        # The reference is used directly from the media_player.py implementation
 
     @property
     def state(self) -> str:
@@ -119,8 +120,9 @@ class PiSignageStatusSensor(PiSignageBaseSensor):
         player_data = self._player_data
         is_connected = player_data.get("isConnected", False)
         
-        # Check if this player has the ignore_cec option enabled
-        ignore_cec = self._config_entry.options.get(CONF_IGNORE_CEC, {}).get(self._player_id, False)
+        # Access the config_entry directly from the hass context to avoid deprecation warnings
+        config_entry = self.hass.config_entries.async_get_entry(self.registry_entry.config_entry_id)
+        ignore_cec = config_entry.options.get(CONF_IGNORE_CEC, {}).get(self._player_id, False)
         
         is_cec_supported = player_data.get("isCecSupported", False) and not ignore_cec
         cec_tv_status = player_data.get("cecTvStatus", False)
