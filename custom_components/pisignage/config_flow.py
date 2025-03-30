@@ -37,7 +37,7 @@ _LOGGER = logging.getLogger(__name__)
 class PiSignageConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for PiSignage."""
 
-    VERSION = 1
+    VERSION = 2
     CONNECTION_CLASS = config_entries.CONN_CLASS_LOCAL_POLL
 
     def __init__(self):

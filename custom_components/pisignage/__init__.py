@@ -25,6 +25,7 @@ from .const import (
     CONF_PLAYERS,
     CONF_SERVER_TYPE,
     CONF_USE_SSL,
+    CONF_IGNORE_CEC,
     SERVER_TYPE_HOSTED,
     SERVER_TYPE_OPEN_SOURCE,
     DEFAULT_PORT_SERVER,
@@ -37,6 +38,30 @@ _LOGGER = logging.getLogger(__name__)
 
 # Define platforms after importing constants
 PLATFORMS = [MEDIA_PLAYER, SENSOR]
+
+
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Migrate an old config entry to new format."""
+    _LOGGER.debug("Migrating PiSignage config entry from version %s", entry.version)
+
+    if entry.version == 1:
+        # Migration from version 1 to 2: Add CONF_IGNORE_CEC options structure
+        _LOGGER.info("Migrating PiSignage config entry from version 1 to 2")
+        
+        # Initialize the ignore_cec options dictionary if it doesn't exist
+        options = dict(entry.options)
+        if CONF_IGNORE_CEC not in options:
+            options[CONF_IGNORE_CEC] = {}
+            
+        # Update to new version
+        hass.config_entries.async_update_entry(
+            entry, 
+            options=options,
+            version=2
+        )
+        _LOGGER.info("Successfully migrated PiSignage config from version 1 to 2")
+
+    return True
 
 
 async def async_setup_domain(hass, config):

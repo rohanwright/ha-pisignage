@@ -9,6 +9,7 @@ from homeassistant.const import UnitOfInformation
 from .const import (
     DOMAIN,
     CONF_PLAYERS,
+    CONF_IGNORE_CEC,
     ATTR_VERSION,
     ATTR_IP,
     ATTR_LAST_SEEN,

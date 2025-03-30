@@ -22,6 +22,7 @@ from homeassistant.const import (
 from .const import (
     DOMAIN,
     CONF_PLAYERS,
+    CONF_IGNORE_CEC,
     ATTR_PLAYLISTS,
     ATTR_GROUP,
     ATTR_STATUS,
