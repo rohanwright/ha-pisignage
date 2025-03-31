@@ -8,7 +8,6 @@ blueprint:
       description: Select one or more PiSignage player entities to control.
       selector:
         entity:
-          domain: media_player
           multiple: true
           filter:
             - integration: pisignage
@@ -17,10 +16,17 @@ blueprint:
       name: Target Playlist
       description: The playlist to switch to.
       selector:
-        entity:
-          domain: media_player
-          integration: pisignage
-        attribute: source_list
+        select:
+          options: >
+            {% set options = [] %}
+            {% for entity in device_entities('media_player') if 'pisignage' in entity %}
+              {% if state_attr(entity, 'source_list') %}
+                {% for source in state_attr(entity, 'source_list') %}
+                  {% set options = options + [source] %}
+                {% endfor %}
+              {% endif %}
+            {% endfor %}
+            {{ options | unique | list }}
 
 action:
   - repeat:
