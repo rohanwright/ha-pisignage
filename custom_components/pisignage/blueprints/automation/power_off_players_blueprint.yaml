@@ -11,7 +11,8 @@ blueprint:
           domain: media_player
           multiple: true
           filter:
-            integration: pisignage
+            - integration: pisignage
+              domain: media_player
 
 action:
   - repeat:

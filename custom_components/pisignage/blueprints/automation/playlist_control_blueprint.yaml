@@ -11,7 +11,8 @@ blueprint:
           domain: media_player
           multiple: true
           filter:
-            integration: pisignage
+            - integration: pisignage
+              domain: media_player
     playlist_source:
       name: Target Playlist
       description: The playlist to switch to.

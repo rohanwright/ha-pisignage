@@ -40,6 +40,15 @@ A Custom Integration for Home Assistant to connect with PiSignage Server (Open S
 4. If two-factor authentication is enabled on your account, you'll be prompted to enter your OTP code
 5. Click "Submit" to connect
 
+### Configuration Options
+
+After initial setup, you can configure additional options:
+
+1. Go to Home Assistant → Settings → Devices & Services
+2. Find the PiSignage integration and click "Configure"
+3. You can set the following options:
+   - **Ignore CEC Functionality**: Select players for which CEC functionality should be disabled. Use this option if your player reports CEC support, but you want to ignore it for control purposes.
+
 ## Two-Factor Authentication
 
 This integration supports two-factor authentication (2FA) for PiSignage accounts that have it enabled. If your account has 2FA enabled:
@@ -53,7 +62,7 @@ Note: OTP authentication is only required during initial setup and not for regul
 
 ## Available Entities
 
-For each PiSignage player, the integration creates a device with the name of the player. Connected to the device is the following entities:
+For each PiSignage player, the integration creates a device with the name of the player. Connected to the device are the following entities:
 
 ### Media Player
 
@@ -63,9 +72,9 @@ For each PiSignage player, the integration creates a device with the name of the
 
 ### Sensors
 
-- **Status**: Shows the current player status
-- **CurrentPlalist**: Reports the device temperature (if available)
-- **Storage**: Shows used storage space
+- **Status**: Shows the current player status (Playing, Not Playing, TV Powered Off, Offline)
+- **Current Playlist**: Shows the playlist currently playing on the device
+- **Storage**: Shows used storage space as a percentage
 - **Player IP**: The local IP address of the player
 - **Location**: The configured location in PiSignage
 
@@ -106,6 +115,42 @@ target:
 data:
   status: "off"
 ```
+
+## Automation Blueprints
+
+This integration includes ready-to-use automation blueprints to help you get started:
+
+### Installing the Blueprints
+
+Blueprints must be manually installed. Follow these steps to install the included blueprints:
+
+1. Go to Settings → Automations & Scenes → Blueprints
+2. Click the "Import Blueprint" button in the bottom right
+3. Enter one of the following URLs for the blueprint you want to install:
+   - Power On Players: `https://github.com/rohanwright/ha-pisignage/blob/main/custom_components/pisignage/blueprints/automation/power_on_players_blueprint.yaml`
+   - Power Off Players: `https://github.com/rohanwright/ha-pisignage/blob/main/custom_components/pisignage/blueprints/automation/power_off_players_blueprint.yaml`
+   - Playlist Control: `https://github.com/rohanwright/ha-pisignage/blob/main/custom_components/pisignage/blueprints/automation/playlist_control_blueprint.yaml`
+4. Click "Preview" to check the blueprint, then click "Import Blueprint"
+5. The blueprint will now be available for creating automations
+
+Alternatively, you can copy the blueprint YAML files from the `custom_components/pisignage/blueprints/automation/` directory to your Home Assistant `config/blueprints/automation/` directory.
+
+### Power On PiSignage Players
+
+Blueprint to turn on multiple PiSignage players with a single automation.
+
+1. Go to Settings → Automations & Scenes → Blueprints
+2. Find the "Power On PiSignage Players" blueprint
+3. Create a new automation using this blueprint
+4. Select the PiSignage player entities you want to control
+
+### Power Off PiSignage Players
+
+Blueprint to turn off multiple PiSignage players with a single automation.
+
+### Switch PiSignage Playlist
+
+Blueprint to change the playlist on one or more PiSignage players.
 
 ## Automation Examples
 
@@ -166,6 +211,8 @@ automation:
 - **Connection Issues**: Ensure your Home Assistant instance can reach your PiSignage server and that the credentials are correct.
 - **Missing Players**: Make sure your players are registered with the PiSignage server and are online.
 - **Playlist Control**: If playlist switching doesn't work, verify that the playlist names match exactly (case-sensitive).
+- **CEC Not Working**: Check if your player has CEC support enabled. If CEC functionality is causing issues, you can disable it in the integration's configuration options.
+- **Two-Factor Authentication**: If you're having issues with 2FA, make sure you're entering the correct OTP code during setup.
 
 ## Credit
 
