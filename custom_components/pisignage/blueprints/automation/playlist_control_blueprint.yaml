@@ -1,6 +1,6 @@
 blueprint:
-  name: Scheduled Playlist Change for PiSignage Media Players
-  description: Automatically change the playlist on selected PiSignage media players at scheduled times. Check the 'source_list' attribute of your media player for available playlists.
+  name: Enhanced Playlist Control for PiSignage Media Players
+  description: Control playlists on PiSignage media players with flexible options - use scheduled changes or manual triggers, and set either one playlist for all players or different playlists per player.
   domain: automation
   input:
     media_players:
@@ -12,19 +12,43 @@ blueprint:
           filter:
             - integration: pisignage
               domain: media_player
-    playlist:
-      name: Playlist
-      description: The playlist to switch to (enter the exact name from the player's source list)
+    playlist_mode:
+      name: Playlist Selection Mode
+      description: Choose whether to set the same playlist for all players or different playlists for each player
+      default: single
+      selector:
+        select:
+          options:
+            - label: "Same playlist for all players"
+              value: single
+            - label: "Different playlist for each player"
+              value: multiple
+    single_playlist:
+      name: Playlist (All Players)
+      description: The playlist to switch to for all players (only used when in single playlist mode)
       selector:
         text:
+      default: ""
+    player_playlists:
+      name: Player-specific Playlists
+      description: "Set specific playlists for each player (only used when in multiple playlist mode). Format: entity_id=playlist,entity_id2=playlist2"
+      selector:
+        text:
+      default: ""
+    enable_schedule:
+      name: Enable Scheduling
+      description: Turn on scheduling (if off, the automation can only be triggered manually)
+      default: true
+      selector:
+        boolean:
     time:
-      name: Time
-      description: Time to change the playlist
+      name: Schedule Time
+      description: Time to change the playlist (only used when scheduling is enabled)
       default: "07:00:00"
       selector:
         time:
     days_of_week:
-      name: Days of Week
+      name: Schedule Days
       description: Days to run this automation (leave empty for every day)
       default: []
       selector:
@@ -49,31 +73,89 @@ blueprint:
 mode: single
 
 trigger:
+  - platform: template
+    id: manual_trigger
+    value_template: "{{ false }}"
   - platform: time
+    id: time_trigger
     at: !input time
+    enabled: "{{ enable_schedule }}"
   
 condition:
-  - condition: template
-    value_template: >
-      {{ true if not days_of_week else now().strftime('%a')|lower in days_of_week }}
+  - condition: or
+    conditions:
+      - condition: trigger
+        id: manual_trigger
+      - condition: and
+        conditions:
+          - condition: trigger
+            id: time_trigger
+          - condition: template
+            value_template: >
+              {{ true if not days_of_week else now().strftime('%a')|lower in days_of_week }}
 
 action:
-  - repeat:
-      for_each: "{{ media_players }}"
-      sequence:
-        - if:
-            - condition: state
-              entity_id: "{{ repeat.item }}"
-              state: 'off'
-          then:
-            - service: media_player.turn_on
-              target:
-                entity_id: "{{ repeat.item }}"
-        - service: media_player.select_source
-          data:
-            source: "{{ playlist }}"
-          target:
-            entity_id: "{{ repeat.item }}"
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ playlist_mode == 'single' }}"
+        sequence:
+          - repeat:
+              for_each: "{{ media_players }}"
+              sequence:
+                - if:
+                    - condition: state
+                      entity_id: "{{ repeat.item }}"
+                      state: 'off'
+                  then:
+                    - service: media_player.turn_on
+                      target:
+                        entity_id: "{{ repeat.item }}"
+                - service: media_player.select_source
+                  data:
+                    source: "{{ single_playlist }}"
+                  target:
+                    entity_id: "{{ repeat.item }}"
+      - conditions:
+          - condition: template
+            value_template: "{{ playlist_mode == 'multiple' }}"
+        sequence:
+          - variables:
+              parsed_playlists: >
+                {% set result = {} %}
+                {% for item in player_playlists.split(',') %}
+                  {% set parts = item.strip().split('=') %}
+                  {% if parts|length == 2 %}
+                    {% set entity_id = parts[0].strip() %}
+                    {% set playlist = parts[1].strip() %}
+                    {% set _ = result.update({entity_id: playlist}) %}
+                  {% endif %}
+                {% endfor %}
+                {{ result }}
+          - repeat:
+              for_each: "{{ media_players }}"
+              sequence:
+                - if:
+                    - condition: template
+                      value_template: "{{ repeat.item in parsed_playlists }}"
+                  then:
+                    - if:
+                        - condition: state
+                          entity_id: "{{ repeat.item }}"
+                          state: 'off'
+                      then:
+                        - service: media_player.turn_on
+                          target:
+                            entity_id: "{{ repeat.item }}"
+                    - service: media_player.select_source
+                      data:
+                        source: "{{ parsed_playlists[repeat.item] }}"
+                      target:
+                        entity_id: "{{ repeat.item }}"
 
 variables:
+  playlist_mode: !input playlist_mode
+  single_playlist: !input single_playlist
+  player_playlists: !input player_playlists
   days_of_week: !input days_of_week
+  enable_schedule: !input enable_schedule
