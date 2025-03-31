@@ -1,39 +1,35 @@
 blueprint:
-  name: Switch PiSignage Playlist
-  description: Change playlist on one or more PiSignage players.
-  domain: automation
+  name: Change Playlist on PiSignage Media Players
+  description: A script to change the playlist on selected PiSignage media players. Check the 'source_list' attribute of your media player for available playlists.
+  domain: script
   input:
-    player_entities:
-      name: Player Entities
-      description: Select one or more PiSignage player entities to control.
+    media_players:
+      name: Media Players
+      description: Select the PiSignage media players to control
       selector:
         entity:
+          integration: pisignage  # Replace with your actual integration
+          domain: media_player
           multiple: true
-          filter:
-            - integration: pisignage
-              domain: media_player
-    playlist_source:
-      name: Target Playlist
-      description: The playlist to switch to.
+    playlist:
+      name: Playlist
+      description: The playlist to switch to (enter the exact name from the player's source list)
       selector:
-        select:
-          options: >
-            {% set options = [] %}
-            {% for entity in device_entities('media_player') if 'pisignage' in entity %}
-              {% if state_attr(entity, 'source_list') %}
-                {% for source in state_attr(entity, 'source_list') %}
-                  {% set options = options + [source] %}
-                {% endfor %}
-              {% endif %}
-            {% endfor %}
-            {{ options | unique | list }}
-
-action:
+        text:
+sequence:
   - repeat:
-      for_each: "{{ input.player_entities }}"
+      for_each: !input media_players
       sequence:
+        - if:
+            - condition: state
+              entity_id: "{{ repeat.item }}"
+              state: 'off'
+          then:
+            - service: media_player.turn_on
+              target:
+                entity_id: "{{ repeat.item }}"
         - service: media_player.select_source
+          data:
+            source: !input playlist
           target:
             entity_id: "{{ repeat.item }}"
-          data:
-            source: "{{ input.playlist_source }}"
