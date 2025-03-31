@@ -1,24 +1,66 @@
 blueprint:
-  name: Change Playlist on PiSignage Media Players
-  description: A script to change the playlist on selected PiSignage media players. Check the 'source_list' attribute of your media player for available playlists.
-  domain: script
+  name: Scheduled Playlist Change for PiSignage Media Players
+  description: Automatically change the playlist on selected PiSignage media players at scheduled times. Check the 'source_list' attribute of your media player for available playlists.
+  domain: automation
   input:
     media_players:
       name: Media Players
-      description: Select the PiSignage media players to control
+      description: Select the PiSignage players to control
       selector:
         entity:
-          integration: pisignage  # Replace with your actual integration
-          domain: media_player
           multiple: true
+          filter:
+            - integration: pisignage
+              domain: media_player
     playlist:
       name: Playlist
       description: The playlist to switch to (enter the exact name from the player's source list)
       selector:
         text:
-sequence:
+    time:
+      name: Time
+      description: Time to change the playlist
+      default: "07:00:00"
+      selector:
+        time:
+    days_of_week:
+      name: Days of Week
+      description: Days to run this automation (leave empty for every day)
+      default: []
+      selector:
+        select:
+          options:
+            - label: Monday
+              value: mon
+            - label: Tuesday
+              value: tue
+            - label: Wednesday
+              value: wed
+            - label: Thursday
+              value: thu
+            - label: Friday
+              value: fri
+            - label: Saturday
+              value: sat
+            - label: Sunday
+              value: sun
+          multiple: true
+      required: false
+
+mode: single
+
+trigger:
+  - platform: time
+    at: !input time
+  
+condition:
+  - condition: template
+    value_template: >
+      {{ true if not days_of_week else now().strftime('%a')|lower in days_of_week }}
+
+action:
   - repeat:
-      for_each: !input media_players
+      for_each: "{{ media_players }}"
       sequence:
         - if:
             - condition: state
@@ -30,6 +72,9 @@ sequence:
                 entity_id: "{{ repeat.item }}"
         - service: media_player.select_source
           data:
-            source: !input playlist
+            source: "{{ playlist }}"
           target:
             entity_id: "{{ repeat.item }}"
+
+variables:
+  days_of_week: !input days_of_week
