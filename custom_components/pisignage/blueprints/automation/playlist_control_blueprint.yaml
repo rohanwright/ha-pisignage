@@ -45,7 +45,6 @@ blueprint:
             - label: Sunday
               value: sun
           multiple: true
-      required: false
 
 mode: single
 
