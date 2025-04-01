@@ -81,7 +81,7 @@ trigger:
   - platform: time
     id: time_trigger
     at: !input time
-    enabled: "{{ enable_schedule }}"
+    enabled: !input enable_schedule
 
 condition:
   - condition: or
