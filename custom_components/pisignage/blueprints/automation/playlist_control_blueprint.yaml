@@ -73,6 +73,14 @@ blueprint:
 
 mode: single
 
+variables:
+  playlist_mode: !input playlist_mode
+  single_playlist: !input single_playlist
+  player_playlists: !input player_playlists
+  days_of_week: !input days_of_week
+  enable_schedule: !input enable_schedule
+  media_players: !input media_players
+
 trigger:
   - platform: template
     id: manual_trigger
@@ -148,10 +156,3 @@ action:
                         source: "{{ player_config[repeat.item] }}"
                       target:
                         entity_id: "{{ repeat.item }}"
-
-variables:
-  playlist_mode: !input playlist_mode
-  single_playlist: !input single_playlist
-  player_playlists: !input player_playlists
-  days_of_week: !input days_of_week
-  enable_schedule: !input enable_schedule
