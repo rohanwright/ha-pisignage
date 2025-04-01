@@ -30,11 +30,12 @@ blueprint:
         text:
       default: ""
     player_playlists:
-      name: Player-specific Playlists
-      description: "Set specific playlists for each player (only used when in multiple playlist mode). Format: entity_id=playlist,entity_id2=playlist2"
+      name: Player Playlists
+      description: "Enter playlists in the SAME ORDER as your players above. First playlist = first player, second playlist = second player, etc."
       selector:
         text:
-      default: ""
+          multiple: true
+      default: []
     enable_schedule:
       name: Enable Scheduling
       description: Turn on scheduling (if off, the automation can only be triggered manually)
@@ -121,23 +122,20 @@ action:
             value_template: "{{ playlist_mode == 'multiple' }}"
         sequence:
           - variables:
-              parsed_playlists: >
-                {% set result = {} %}
-                {% for item in player_playlists.split(',') %}
-                  {% set parts = item.strip().split('=') %}
-                  {% if parts|length == 2 %}
-                    {% set entity_id = parts[0].strip() %}
-                    {% set playlist = parts[1].strip() %}
-                    {% set _ = result.update({entity_id: playlist}) %}
+              player_config: >
+                {% set config = {} %}
+                {% for i in range(0, media_players|length) %}
+                  {% if i < player_playlists|length %}
+                    {% set _ = config.update({media_players[i]: player_playlists[i]}) %}
                   {% endif %}
                 {% endfor %}
-                {{ result }}
+                {{ config }}
           - repeat:
               for_each: "{{ media_players }}"
               sequence:
                 - if:
                     - condition: template
-                      value_template: "{{ repeat.item in parsed_playlists }}"
+                      value_template: "{{ repeat.item in player_config }}"
                   then:
                     - if:
                         - condition: state
@@ -149,7 +147,7 @@ action:
                             entity_id: "{{ repeat.item }}"
                     - service: media_player.select_source
                       data:
-                        source: "{{ parsed_playlists[repeat.item] }}"
+                        source: "{{ player_config[repeat.item] }}"
                       target:
                         entity_id: "{{ repeat.item }}"
 
