@@ -434,6 +434,11 @@ class PiSignageAPI:
         """Update the default playlist for a group."""
         _LOGGER.debug("Updating group %s to use playlist %s", group_id, playlist_name)
         
+        # Safety check to prevent setting TV_OFF playlist for groups so when we power on, the original playlist will ressume
+        if playlist_name == "TV_OFF":
+            _LOGGER.debug("Attempted to set TV_OFF playlist for group %s, Ignored change", group_id)
+            return {"success": False, "stat_message": "Cannot set TV_OFF playlist for groups"}
+        
         # Ensure authenticated
         if not self.token:
             self.authenticate()

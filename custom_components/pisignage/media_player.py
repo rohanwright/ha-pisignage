@@ -100,7 +100,12 @@ class PiSignageMediaPlayer(MediaPlayerEntity):
         """Update the available playlists as sources."""
         self._sources = []
         if playlists := self.coordinator.playlists:
-            self._sources = [playlist.get("name") for playlist in playlists if "name" in playlist]
+            # Filter out the TV_OFF playlist from the source list
+            self._sources = [
+                playlist.get("name") 
+                for playlist in playlists 
+                if "name" in playlist and playlist.get("name") != "TV_OFF"
+            ]
             _LOGGER.debug("Updated playlists for %s, found %d playlists", self._name, len(self._sources))
 
     @property
