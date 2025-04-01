@@ -1,5 +1,5 @@
 blueprint:
-  name: Enhanced Playlist Control for PiSignage Media Players
+  name: Playlist Automation for PiSignage
   description: Control playlists on PiSignage media players with flexible options - use scheduled changes or manual triggers, and set either one playlist for all players or different playlists per player.
   domain: automation
   input:
@@ -78,7 +78,7 @@ variables:
   single_playlist: !input single_playlist
   player_playlists: !input player_playlists
   days_of_week: !input days_of_week
-  enable_schedule: !input enable_schedule
+  enable_schedule: "{{ true if enable_schedule is not defined else enable_schedule }}"
   media_players: !input media_players
 
 trigger:
@@ -109,6 +109,8 @@ action:
           - condition: template
             value_template: "{{ playlist_mode == 'single' }}"
         sequence:
+          - condition: template
+            value_template: "{{ single_playlist is defined and single_playlist|length > 0 }}"
           - repeat:
               for_each: "{{ media_players }}"
               sequence:
@@ -124,6 +126,7 @@ action:
                     source: "{{ single_playlist }}"
                   target:
                     entity_id: "{{ repeat.item }}"
+
       - conditions:
           - condition: template
             value_template: "{{ playlist_mode == 'multiple' }}"
@@ -132,8 +135,8 @@ action:
               player_config: >
                 {% set config = {} %}
                 {% for i in range(0, media_players|length) %}
-                  {% if i < player_playlists|length %}
-                    {% set _ = config.update({media_players[i]: player_playlists[i]}) %}
+                  {% if i < player_playlists|length and player_playlists[i]|trim != '' %}
+                    {% set config = dict(config, **{media_players[i]: player_playlists[i]}) %}
                   {% endif %}
                 {% endfor %}
                 {{ config }}
@@ -142,7 +145,7 @@ action:
               sequence:
                 - if:
                     - condition: template
-                      value_template: "{{ repeat.item in player_config }}"
+                      value_template: "{{ repeat.item in player_config and player_config[repeat.item]|trim != '' }}"
                   then:
                     - if:
                         - condition: template
