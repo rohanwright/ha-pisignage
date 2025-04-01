@@ -1,5 +1,5 @@
 blueprint:
-  name: Playlist Automation for PiSignage
+  name: Enhanced Playlist Control for PiSignage Media Players
   description: Control playlists on PiSignage media players with flexible options - use scheduled changes or manual triggers, and set either one playlist for all players or different playlists per player.
   domain: automation
   input:
@@ -23,15 +23,9 @@ blueprint:
               value: single
             - label: "Different playlist for each player"
               value: multiple
-    single_playlist:
-      name: Playlist (All Players)
-      description: The playlist to switch to for all players (only used when in single playlist mode)
-      selector:
-        text:
-      default: ""
     player_playlists:
       name: Player Playlists
-      description: "Enter playlists in the SAME ORDER as your players above. First playlist = first player, second playlist = second player, etc."
+      description: "For single mode: First playlist will be used for all players. For multiple mode: Enter playlists in the SAME ORDER as your players above."
       selector:
         text:
           multiple: true
@@ -75,7 +69,6 @@ mode: single
 
 variables:
   playlist_mode: !input playlist_mode
-  single_playlist: !input single_playlist
   player_playlists: !input player_playlists
   days_of_week: !input days_of_week
   enable_schedule: "{{ true if enable_schedule is not defined else enable_schedule }}"
@@ -110,7 +103,7 @@ action:
             value_template: "{{ playlist_mode == 'single' }}"
         sequence:
           - condition: template
-            value_template: "{{ single_playlist is defined and single_playlist|length > 0 }}"
+            value_template: "{{ player_playlists is defined and player_playlists|length > 0 and player_playlists[0]|trim != '' }}"
           - repeat:
               for_each: "{{ media_players }}"
               sequence:
@@ -123,7 +116,7 @@ action:
                         entity_id: "{{ repeat.item }}"
                 - service: media_player.select_source
                   data:
-                    source: "{{ single_playlist }}"
+                    source: "{{ player_playlists[0] }}"
                   target:
                     entity_id: "{{ repeat.item }}"
 
