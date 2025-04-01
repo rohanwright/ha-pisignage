@@ -81,7 +81,7 @@ trigger:
     id: time_trigger
     at: !input time
     enabled: "{{ enable_schedule }}"
-  
+
 condition:
   - condition: or
     conditions:
@@ -105,9 +105,8 @@ action:
               for_each: "{{ media_players }}"
               sequence:
                 - if:
-                    - condition: state
-                      entity_id: "{{ repeat.item }}"
-                      state: 'off'
+                    - condition: template
+                      value_template: "{{ is_state(repeat.item, 'off') }}"
                   then:
                     - service: media_player.turn_on
                       target:
@@ -138,9 +137,8 @@ action:
                       value_template: "{{ repeat.item in player_config }}"
                   then:
                     - if:
-                        - condition: state
-                          entity_id: "{{ repeat.item }}"
-                          state: 'off'
+                        - condition: template
+                          value_template: "{{ is_state(repeat.item, 'off') }}"
                       then:
                         - service: media_player.turn_on
                           target:
