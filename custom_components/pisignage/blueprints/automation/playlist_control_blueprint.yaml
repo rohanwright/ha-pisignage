@@ -101,44 +101,51 @@ action:
       - conditions:
           - condition: template
             value_template: "{{ playlist_mode == 'single' }}"
+
         sequence:
           - condition: template
             value_template: "{{ player_playlists is defined and player_playlists|length > 0 and player_playlists[0]|trim != '' }}"
+
           - repeat:
               for_each: "{{ media_players }}"
               sequence:
                 - if:
                     - condition: template
                       value_template: "{{ is_state(repeat.item, 'off') }}"
+
                   then:
                     - service: media_player.turn_on
                       target:
                         entity_id: "{{ repeat.item }}"
+
                 - service: media_player.select_source
                   data:
                     source: "{{ player_playlists[0] }}"
+
                   target:
                     entity_id: "{{ repeat.item }}"
 
       - conditions:
           - condition: template
             value_template: "{{ playlist_mode == 'multiple' }}"
+
         sequence:
           - variables:
               player_config: >
-                {% set config = {} %}
+                {% set config = namespace(data={}) %}
                 {% for i in range(0, media_players|length) %}
                   {% if i < player_playlists|length and player_playlists[i]|trim != '' %}
-                    {% set config = dict(config, **{media_players[i]: player_playlists[i]}) %}
+                    {% set config.data = dict(config.data) %}
+                    {% set config.data = dict(config.data, **{media_players[i]: player_playlists[i]}) %}
                   {% endif %}
                 {% endfor %}
-                {{ config }}
+                {{ config.data }}
           - repeat:
               for_each: "{{ media_players }}"
               sequence:
                 - if:
                     - condition: template
-                      value_template: "{{ repeat.item in player_config and player_config[repeat.item]|trim != '' }}"
+                      value_template: "{{ repeat.item in player_config }}"
                   then:
                     - if:
                         - condition: template
