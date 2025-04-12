@@ -113,7 +113,7 @@ class PiSignageConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             # Test connection
             try:
                 response = await self.hass.async_add_executor_job(
-                    self._test_connection, api_url, username, password
+                    self._test_connection, api_url, username, password, server_type
                 )
                 
                 if response and response.get("success"):
@@ -218,63 +218,85 @@ class PiSignageConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             errors=errors,
         )
 
-    def _test_connection(self, api_url, username, password):
+    def _test_connection(self, api_url, username, password, server_type):
         """Test connection to PiSignage and return authentication token."""
-        session_url = f"{api_url}/session"
-        _LOGGER.debug("Testing PiSignage connection to: %s", session_url)
+        _LOGGER.debug("Testing PiSignage connection to: %s (server type: %s)", api_url, server_type)
         
         try:
             session = requests.Session()
             
-            # Format authentication payload according to API docs
-            auth_payload = {
-                "email": username,
-                "password": password,
-                "getToken": True  # Using boolean true, not string "true"
-            }
-            
-            _LOGGER.debug("Sending authentication request with payload: %s", 
-                         {**auth_payload, "password": "***REDACTED***"})
-            
-            response = session.post(
-                session_url,
-                json=auth_payload,
-                timeout=10,
-            )
-            
-            _LOGGER.debug("Got response status code: %s", response.status_code)
-            
-            # Try to decode JSON regardless of status code to handle error messages
-            try:
-                result = response.json()
-                _LOGGER.debug("Response content: %s", result)
+            # Different authentication approach based on server type
+            if server_type == SERVER_TYPE_OPEN_SOURCE:
+                # For open source server, use basic auth
+                session.auth = (username, password)
                 
-                # Special handling for OTP required
-                if response.status_code == 401 and result.get("message") == "OTP needed":
-                    _LOGGER.debug("OTP authentication required")
-                    return result
-                    
-                # Check for non-200 status code after handling special cases
+                # Simply try to get the players list to verify credentials
+                response = session.get(
+                    f"{api_url}/players",
+                    timeout=10,
+                )
+                
+                _LOGGER.debug("Got response status code: %s", response.status_code)
+                
+                # Check for successful status code
                 response.raise_for_status()
                 
-                # Check for successful response - either a "success" field or presence of token
-                if result.get("token"):
-                    _LOGGER.debug("Authentication successful, token found in response")
-                    # Create a compatible response structure
-                    return {"success": True, "data": {"token": result.get("token")}}
-                elif result.get("success") is False:
-                    _LOGGER.error("Authentication failed with message: %s", 
-                                 result.get("stat_message", "Unknown error"))
-                    return result
-                else:
-                    _LOGGER.error("Ambiguous authentication response, no success flag or token found")
-                    return {"success": False, "stat_message": "Ambiguous response"}
-            except ValueError as ex:
-                # Handle case where response isn't JSON
-                _LOGGER.error("Response isn't valid JSON: %s", str(ex))
-                _LOGGER.debug("Response content: %s", response.text)
-                raise
+                # Try to parse as JSON to validate response format
+                result = response.json()
                 
+                # If we got this far, authentication was successful
+                return {"success": True}
+                
+            else:
+                # For hosted service, use token-based auth
+                auth_payload = {
+                    "email": username,
+                    "password": password,
+                    "getToken": True
+                }
+                
+                _LOGGER.debug("Sending authentication request with payload: %s", 
+                            {**auth_payload, "password": "***REDACTED***"})
+                
+                response = session.post(
+                    f"{api_url}/session",
+                    json=auth_payload,
+                    timeout=10,
+                )
+                
+                _LOGGER.debug("Got response status code: %s", response.status_code)
+                
+                # Try to decode JSON regardless of status code to handle error messages
+                try:
+                    result = response.json()
+                    _LOGGER.debug("Response content: %s", result)
+                    
+                    # Special handling for OTP required
+                    if response.status_code == 401 and result.get("message") == "OTP needed":
+                        _LOGGER.debug("OTP authentication required")
+                        return result
+                        
+                    # Check for non-200 status code after handling special cases
+                    response.raise_for_status()
+                    
+                    # Check for successful response - either a "success" field or presence of token
+                    if result.get("token"):
+                        _LOGGER.debug("Authentication successful, token found in response")
+                        # Create a compatible response structure
+                        return {"success": True, "data": {"token": result.get("token")}}
+                    elif result.get("success") is False:
+                        _LOGGER.error("Authentication failed with message: %s", 
+                                    result.get("stat_message", "Unknown error"))
+                        return result
+                    else:
+                        _LOGGER.error("Ambiguous authentication response, no success flag or token found")
+                        return {"success": False, "stat_message": "Ambiguous response"}
+                except ValueError as ex:
+                    # Handle case where response isn't JSON
+                    _LOGGER.error("Response isn't valid JSON: %s", str(ex))
+                    _LOGGER.debug("Response content: %s", response.text)
+                    raise
+                    
         except requests.exceptions.JSONDecodeError as ex:
             _LOGGER.error("Failed to decode JSON response from server: %s", str(ex))
             _LOGGER.debug("Response content: %s", response.text if 'response' in locals() else "No response")

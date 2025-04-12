@@ -94,13 +94,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     password = entry.data[CONF_PASSWORD]
 
     # Create API client
-    api = PiSignageAPI(api_server, username, password)
+    api = PiSignageAPI(api_server, username, password, server_type)
     
     # Verify authentication
     try:
         _LOGGER.debug("Authenticating with PiSignage server")
-        token = await hass.async_add_executor_job(api.authenticate)
-        if not token:
+        auth_success = await hass.async_add_executor_job(api.authenticate)
+        if not auth_success:
             _LOGGER.error("Authentication to PiSignage server failed")
             raise ConfigEntryNotReady("Authentication to PiSignage failed")
         _LOGGER.debug("Successfully authenticated with PiSignage server")
@@ -167,18 +167,38 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 class PiSignageAPI:
     """API client for PiSignage."""
 
-    def __init__(self, api_server, username, password):
+    def __init__(self, api_server, username, password, server_type):
         """Initialize the API client."""
         self.api_server = api_server
         self.username = username
         self.password = password
+        self.server_type = server_type
         self.token = None
         self.session = requests.Session()
-        _LOGGER.debug("Initialized PiSignage API client for %s", api_server)
+        
+        # For open source servers, configure basic auth directly
+        if server_type == SERVER_TYPE_OPEN_SOURCE:
+            self.session.auth = (username, password)
+        
+        _LOGGER.debug("Initialized PiSignage API client for %s (type: %s)", api_server, server_type)
 
     def authenticate(self):
         """Authenticate with the PiSignage server."""
         _LOGGER.debug("Attempting to authenticate with PiSignage server: %s", self.api_server)
+        
+        # For open source server, we use basic authentication - no token needed
+        if self.server_type == SERVER_TYPE_OPEN_SOURCE:
+            try:
+                # Just perform a simple GET request to verify credentials
+                response = self.session.get(f"{self.api_server}/players", timeout=10)
+                response.raise_for_status()
+                _LOGGER.debug("Open source server authentication successful")
+                return True
+            except requests.exceptions.RequestException as ex:
+                _LOGGER.error("Open source server authentication failed: %s", ex)
+                return False
+        
+        # For hosted service, use token-based authentication
         try:
             # Format authentication payload according to API docs
             auth_payload = {
@@ -210,13 +230,13 @@ class PiSignageAPI:
             if data.get("token"):
                 self.token = data.get("token")
                 _LOGGER.debug("Authentication successful, token received")
-                return self.token
+                return True
             elif data.get("success") is False:
                 _LOGGER.error("Authentication failed: %s", data.get("stat_message", "Unknown error"))
             else:
                 _LOGGER.error("Authentication failed: Unexpected response format")
                 
-            return None
+            return False
         except requests.exceptions.JSONDecodeError as ex:
             _LOGGER.error("Failed to decode JSON response from server: %s", str(ex))
             _LOGGER.debug("Response content: %s", response.text if 'response' in locals() else "No response")
@@ -225,25 +245,88 @@ class PiSignageAPI:
             _LOGGER.error("Error during authentication: %s", ex)
             raise
 
+    def _handle_request(self, method, endpoint, **kwargs):
+        """Handle API request with token expiration check and retry logic."""
+        # Only handle tokens for hosted service
+        if self.server_type == SERVER_TYPE_HOSTED:
+            # Ensure we have a token
+            if not self.token:
+                _LOGGER.debug("No auth token, authenticating first")
+                if not self.authenticate():
+                    _LOGGER.error("Authentication failed")
+                    raise ConnectionError("Authentication failed")
+                
+            # For GET requests, add token as query parameter
+            if method == "get" and "params" in kwargs:
+                kwargs["params"]["token"] = self.token
+            elif method == "get":
+                kwargs["params"] = {"token": self.token}
+            
+            # For POST requests, add token to JSON body
+            if method == "post":
+                if "json" in kwargs:
+                    # Add token to existing JSON payload
+                    kwargs["json"]["token"] = self.token
+                elif "data" not in kwargs:
+                    # No payload but need token - use empty JSON object
+                    kwargs["json"] = {"token": self.token}
+        elif self.server_type == SERVER_TYPE_OPEN_SOURCE and method == "post" and "json" not in kwargs and "data" not in kwargs:
+            # For open source POST requests with no body specified, don't add an empty one
+            pass
+        
+        # Execute request
+        try:
+            if method == "get":
+                response = self.session.get(f"{self.api_server}/{endpoint}", **kwargs)
+            else:  # post
+                response = self.session.post(f"{self.api_server}/{endpoint}", **kwargs)
+                
+            response.raise_for_status()
+            return response.json()
+            
+        except requests.exceptions.HTTPError as ex:
+            # Check if this might be an expired token (401/403)
+            if self.server_type == SERVER_TYPE_HOSTED and ex.response.status_code in (401, 403):
+                _LOGGER.warning("Request failed with 401/403, token might be expired. Reauthenticating...")
+                
+                # Try to authenticate again
+                if self.authenticate():
+                    _LOGGER.debug("Reauthentication successful, retrying request")
+                    
+                    # Update token in request and retry
+                    if method == "get" and "params" in kwargs:
+                        kwargs["params"]["token"] = self.token
+                    elif method == "get":
+                        kwargs["params"] = {"token": self.token}
+                        
+                    if method == "post" and "json" in kwargs:
+                        kwargs["json"]["token"] = self.token
+                    elif method == "post" and "data" not in kwargs:
+                        kwargs["json"] = {"token": self.token}
+                    
+                    # Execute request again
+                    if method == "get":
+                        retry_response = self.session.get(f"{self.api_server}/{endpoint}", **kwargs)
+                    else:  # post
+                        retry_response = self.session.post(f"{self.api_server}/{endpoint}", **kwargs)
+                        
+                    retry_response.raise_for_status()
+                    return retry_response.json()
+                else:
+                    _LOGGER.error("Reauthentication failed")
+                    raise ConnectionError("Reauthentication failed")
+            else:
+                # Not a token issue, re-raise
+                raise
+                
     def get_players(self):
         """Get list of players."""
         _LOGGER.debug("Fetching players list from PiSignage server")
-        if not self.token:
-            _LOGGER.debug("No auth token, re-authenticating")
-            self.authenticate()
-
+        
         try:
-            response = self.session.get(
-                f"{self.api_server}/players",
-                params={"token": self.token},
-                timeout=10,
-            )
-            response.raise_for_status()
-            data = response.json()
+            data = self._handle_request("get", "players", timeout=10)
             
-            # Log the raw response for debugging
-            # _LOGGER.debug("Raw players response: %s", data)
-            
+            # Process the response
             if data.get("success"):
                 players = data.get("data", [])
                 _LOGGER.debug("Retrieved %d players from server", len(players))
@@ -263,22 +346,11 @@ class PiSignageAPI:
     def get_player(self, player_id):
         """Get player details."""
         _LOGGER.debug("Fetching details for player: %s", player_id)
-        if not self.token:
-            _LOGGER.debug("No auth token, re-authenticating")
-            self.authenticate()
-
+        
         try:
-            response = self.session.get(
-                f"{self.api_server}/players/{player_id}",
-                params={"token": self.token},
-                timeout=10,
-            )
-            response.raise_for_status()
-            data = response.json()
+            data = self._handle_request("get", f"players/{player_id}", timeout=10)
             
-            # Log the raw response for debugging
-            # _LOGGER.debug("Raw player details response for %s: %s", player_id, data)
-            
+            # Process the response
             if data.get("success"):
                 _LOGGER.debug("Successfully retrieved details for player: %s", player_id)
                 return data.get("data", {})
@@ -297,18 +369,13 @@ class PiSignageAPI:
     def tv_off(self, player_id):
         """Turn TV off."""
         _LOGGER.debug("Turning off TV for player: %s", player_id)
-        if not self.token:
-            _LOGGER.debug("No auth token, re-authenticating")
-            self.authenticate()
-
+        
         try:
-            response = self.session.post(
-                f"{self.api_server}/pitv/{player_id}",
-                json={"status": True, "token": self.token},
-                timeout=10,
-            )
-            response.raise_for_status()
-            data = response.json()
+            # Prepare payload without token (will be added by _handle_request for hosted service)
+            payload = {"status": True}
+            
+            data = self._handle_request("post", f"pitv/{player_id}", json=payload, timeout=10)
+            
             if data.get("success"):
                 _LOGGER.info("Successfully turned off TV for player: %s", player_id)
             else:
@@ -321,18 +388,13 @@ class PiSignageAPI:
     def tv_on(self, player_id):
         """Turn TV on."""
         _LOGGER.debug("Turning on TV for player: %s", player_id)
-        if not self.token:
-            _LOGGER.debug("No auth token, re-authenticating")
-            self.authenticate()
-
+        
         try:
-            response = self.session.post(
-                f"{self.api_server}/pitv/{player_id}",
-                json={"status": False, "token": self.token},
-                timeout=10,
-            )
-            response.raise_for_status()
-            data = response.json()
+            # Prepare payload without token (will be added by _handle_request for hosted service)
+            payload = {"status": False}
+            
+            data = self._handle_request("post", f"pitv/{player_id}", json=payload, timeout=10)
+            
             if data.get("success"):
                 _LOGGER.info("Successfully turned on TV for player: %s", player_id)
             else:
@@ -345,18 +407,10 @@ class PiSignageAPI:
     def play_playlist(self, player_id, playlist):
         """Play a specific playlist."""
         _LOGGER.debug("Playing playlist '%s' on player: %s", playlist, player_id)
-        if not self.token:
-            _LOGGER.debug("No auth token, re-authenticating")
-            self.authenticate()
-
+        
         try:
-            response = self.session.post(
-                f"{self.api_server}/setplaylist/{player_id}/{playlist}",
-                json={"token": self.token},
-                timeout=10,
-            )
-            response.raise_for_status()
-            data = response.json()
+            data = self._handle_request("post", f"setplaylist/{player_id}/{playlist}", timeout=10)
+            
             if data.get("success"):
                 _LOGGER.info("Successfully started playlist '%s' on player: %s", playlist, player_id)
             else:
@@ -369,18 +423,10 @@ class PiSignageAPI:
     def media_control(self, player_id, action):
         """Control media playback."""
         _LOGGER.debug("Sending media control '%s' to player: %s", action, player_id)
-        if not self.token:
-            _LOGGER.debug("No auth token, re-authenticating")
-            self.authenticate()
-
+        
         try:
-            response = self.session.post(
-                f"{self.api_server}/playlistmedia/{player_id}/{action}",
-                json={"token": self.token},
-                timeout=10,
-            )
-            response.raise_for_status()
-            data = response.json()
+            data = self._handle_request("post", f"playlistmedia/{player_id}/{action}", timeout=10)
+        
             if data.get("success"):
                 _LOGGER.info("Successfully sent media control '%s' to player: %s", action, player_id)
             else:
@@ -393,18 +439,9 @@ class PiSignageAPI:
     def get_playlists(self):
         """Get list of playlists."""
         _LOGGER.debug("Fetching playlists from PiSignage server")
-        if not self.token:
-            _LOGGER.debug("No auth token, re-authenticating")
-            self.authenticate()
-
+        
         try:
-            response = self.session.get(
-                f"{self.api_server}/playlists",
-                params={"token": self.token},
-                timeout=10,
-            )
-            response.raise_for_status()
-            data = response.json()
+            data = self._handle_request("get", "playlists", timeout=10)
             
             # Log the raw response structure for debugging
             if isinstance(data, dict):
@@ -438,28 +475,23 @@ class PiSignageAPI:
         if playlist_name == "TV_OFF":
             _LOGGER.debug("Attempted to set TV_OFF playlist for group %s, Ignored change", group_id)
             return {"success": False, "stat_message": "Cannot set TV_OFF playlist for groups"}
-        
-        # Ensure authenticated
-        if not self.token:
-            self.authenticate()
 
         try:
             # Fetch required data
-            group_response = self.session.get(
-                f"{self.api_server}/groups/{group_id}",
-                params={"token": self.token},
-                timeout=10,
-            )
-            group_response.raise_for_status()
-            group_data = group_response.json().get("data", {})
+            group_data = self._handle_request("get", f"groups/{group_id}", timeout=10)
+            playlists_data = self._handle_request("get", "playlists", timeout=10)
             
-            playlists_response = self.session.get(
-                f"{self.api_server}/playlists",
-                params={"token": self.token},
-                timeout=10,
-            )
-            playlists_response.raise_for_status()
-            all_playlists = playlists_response.json().get("data", [])
+            # Handle different response structures
+            if isinstance(group_data, dict) and group_data.get("success") and "data" in group_data:
+                group_data = group_data.get("data", {})
+            
+            # Handle different response structures for playlists
+            if isinstance(playlists_data, dict) and playlists_data.get("success") and "data" in playlists_data:
+                all_playlists = playlists_data.get("data", [])
+            elif isinstance(playlists_data, list):
+                all_playlists = playlists_data
+            else:
+                all_playlists = []
             
             # Find target playlist
             target_playlist = next(
@@ -500,21 +532,15 @@ class PiSignageAPI:
                     if template := playlist.get("templateName"):
                         asset_names.add(template)
             
-            # Prepare and send update
+            # Prepare update data
             update_data = {
                 "playlists": group_playlists,
                 "assets": list(asset_names),
                 "deploy": True
             }
             
-            deploy_response = self.session.post(
-                f"{self.api_server}/groups/{group_id}",
-                json=update_data,
-                params={"token": self.token},
-                timeout=10,
-            )
-            deploy_response.raise_for_status()
-            result = deploy_response.json()
+            # Send update
+            result = self._handle_request("post", f"groups/{group_id}", json=update_data, timeout=10)
             
             if result.get("success"):
                 _LOGGER.info("Successfully updated group %s to use playlist '%s'", 
