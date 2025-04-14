@@ -53,7 +53,6 @@ class PiSignageConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self.context["server_type"] = user_input[CONF_SERVER_TYPE]
             return await self.async_step_server_details()
 
-        # Use selector.select instead of vol.In() for proper translation
         schema = vol.Schema({
             vol.Required(CONF_SERVER_TYPE, default=SERVER_TYPE_OPEN_SOURCE): 
                 selector.SelectSelector(
@@ -321,7 +320,7 @@ class PiSignageConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             auth_payload = {
                 "email": username,
                 "password": password,
-                "code": otp_code,  # Add OTP code to payload
+                "code": otp_code,
                 "getToken": True
             }
             
@@ -375,7 +374,6 @@ class PiSignageOptionsFlow(config_entries.OptionsFlow):
 
     def __init__(self, config_entry):
         """Initialize options flow."""
-        # No need to store config_entry directly - done automatically by OptionsFlow
         self.options = dict(config_entry.options)
         # Initialize ignore_cec dictionary if it doesn't exist
         if CONF_IGNORE_CEC not in self.options:

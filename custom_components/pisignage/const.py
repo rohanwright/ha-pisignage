@@ -9,12 +9,12 @@ CONF_API_HOST = "host"
 CONF_API_PORT = "port" 
 CONF_USERNAME = "username"
 CONF_PASSWORD = "password"
-CONF_OTP = "otp"  # New constant for OTP code
+CONF_OTP = "otp"
 CONF_PLAYERS = "players"
 CONF_PLAYER_ID = "player_id"
 CONF_PLAYER_NAME = "player_name"
 CONF_USE_SSL = "use_ssl"
-CONF_IGNORE_CEC = "ignore_cec"  # New constant for ignoring CEC
+CONF_IGNORE_CEC = "ignore_cec"
 
 # Server types
 SERVER_TYPE_HOSTED = "hosted"

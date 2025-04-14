@@ -47,7 +47,7 @@ SUPPORT_PISIGNAGE = (
 
 async def async_setup_entry(hass, entry, async_add_entities):
     """Set up the PiSignage media players."""
-    _LOGGER.info("Setting up PiSignage media player entities")
+    _LOGGER.debug("Setting up PiSignage media player entities")
     coordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
     api = hass.data[DOMAIN][entry.entry_id]["api"]
     
@@ -60,7 +60,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
         entities.append(PiSignageMediaPlayer(coordinator, api, player, entry))
     
     async_add_entities(entities, True)
-    _LOGGER.info("Added %d PiSignage media player entities", len(entities))
+    _LOGGER.debug("Added %d PiSignage media player entities", len(entities))
 
 
 class PiSignageMediaPlayer(MediaPlayerEntity):
@@ -74,10 +74,8 @@ class PiSignageMediaPlayer(MediaPlayerEntity):
         self._name = player.get("name", f"PiSignage Player {self._player_id}")
         self._unique_id = f"pisignage_{self._player_id}"
         self._available = True
-        # We don't store the config_entry directly anymore
         self._sources = []
         self._update_sources()
-        # Register to coordinator
         coordinator.async_add_listener(self._update_sources)
         self._attr_should_poll = False
         _LOGGER.debug("Initialized PiSignage media player entity: %s", self._name)
@@ -216,11 +214,9 @@ class PiSignageMediaPlayer(MediaPlayerEntity):
             
         return attrs
 
-    # Remove the async_update method - coordinator handles updates
-
     async def async_turn_on(self) -> None:
         """Turn the device on."""
-        _LOGGER.info("Turning on TV for player %s", self._name)
+        _LOGGER.debug("Turning on TV for player %s", self._name)
         await self.hass.async_add_executor_job(
             self.api.tv_on, self._player_id
         )
@@ -228,7 +224,7 @@ class PiSignageMediaPlayer(MediaPlayerEntity):
 
     async def async_turn_off(self) -> None:
         """Turn the device off."""
-        _LOGGER.info("Turning off TV for player %s", self._name)
+        _LOGGER.debug("Turning off TV for player %s", self._name)
         await self.hass.async_add_executor_job(
             self.api.tv_off, self._player_id
         )
@@ -236,7 +232,7 @@ class PiSignageMediaPlayer(MediaPlayerEntity):
 
     async def async_media_play(self) -> None:
         """Send play command."""
-        _LOGGER.info("Sending play command to player %s", self._name)
+        _LOGGER.debug("Sending play command to player %s", self._name)
         await self.hass.async_add_executor_job(
             self.api.media_control, self._player_id, "play"
         )
@@ -244,7 +240,7 @@ class PiSignageMediaPlayer(MediaPlayerEntity):
 
     async def async_media_pause(self) -> None:
         """Send pause command."""
-        _LOGGER.info("Sending pause command to player %s", self._name)
+        _LOGGER.debug("Sending pause command to player %s", self._name)
         await self.hass.async_add_executor_job(
             self.api.media_control, self._player_id, "pause"
         )
@@ -252,7 +248,7 @@ class PiSignageMediaPlayer(MediaPlayerEntity):
 
     async def async_media_next_track(self) -> None:
         """Send next track command."""
-        _LOGGER.info("Sending next track command to player %s", self._name)
+        _LOGGER.debug("Sending next track command to player %s", self._name)
         await self.hass.async_add_executor_job(
             self.api.media_control, self._player_id, "forward"
         )
@@ -260,7 +256,7 @@ class PiSignageMediaPlayer(MediaPlayerEntity):
 
     async def async_media_previous_track(self) -> None:
         """Send previous track command."""
-        _LOGGER.info("Sending previous track command to player %s", self._name)
+        _LOGGER.debug("Sending previous track command to player %s", self._name)
         await self.hass.async_add_executor_job(
             self.api.media_control, self._player_id, "backward"
         )
@@ -271,7 +267,7 @@ class PiSignageMediaPlayer(MediaPlayerEntity):
     ) -> None:
         """Play a piece of media."""
         # In this case, media_id is the playlist name
-        _LOGGER.info("Playing playlist '%s' on player %s", media_id, self._name)
+        _LOGGER.debug("Playing playlist '%s' on player %s", media_id, self._name)
         await self.hass.async_add_executor_job(
             self.api.play_playlist, self._player_id, media_id
         )
@@ -279,7 +275,7 @@ class PiSignageMediaPlayer(MediaPlayerEntity):
 
     async def async_select_source(self, source: str) -> None:
         """Select playlist to play."""
-        _LOGGER.info("Selecting source '%s' on player %s", source, self._name)
+        _LOGGER.debug("Selecting source '%s' on player %s", source, self._name)
         group_id = self._player_data.get("group", {}).get("_id")
         if not group_id:
             _LOGGER.error("No group assigned to player %s", self._name)

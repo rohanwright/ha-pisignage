@@ -178,7 +178,8 @@ class PiSignageAPI:
         self.server_type = server_type
         self.token = None
         self.session = requests.Session()
-        self.coordinator = None  # Will be set after coordinator is created
+        self.coordinator = None 
+        self.needs_fast_updates = False
         
         # For open source servers, configure basic auth directly
         if server_type == SERVER_TYPE_OPEN_SOURCE:
@@ -208,7 +209,7 @@ class PiSignageAPI:
             auth_payload = {
                 "email": self.username,
                 "password": self.password,
-                "getToken": True  # Boolean true, not string
+                "getToken": True
             }
             
             _LOGGER.debug("Sending authentication request with payload: %s", 
@@ -278,8 +279,9 @@ class PiSignageAPI:
             # For open source POST requests with no body specified, don't add an empty one
             pass
         
-        # Execute request
+        # Execute request and handle response
         try:
+            # Send the actual request to the API
             if method == "get":
                 response = self.session.get(f"{self.api_server}/{endpoint}", **kwargs)
             else:  # post
@@ -289,7 +291,7 @@ class PiSignageAPI:
             return response.json()
             
         except requests.exceptions.HTTPError as ex:
-            # Check if this might be an expired token (401/403)
+            # Token expired handling - attempt reauthentication for 401/403 errors
             if self.server_type == SERVER_TYPE_HOSTED and ex.response.status_code in (401, 403):
                 _LOGGER.warning("Request failed with 401/403, token might be expired. Reauthenticating...")
                 
@@ -381,10 +383,9 @@ class PiSignageAPI:
             data = self._handle_request("post", f"pitv/{player_id}", json=payload, timeout=10)
             
             if data.get("success"):
-                _LOGGER.info("Successfully turned off TV for player: %s", player_id)
-                # Trigger faster updates if coordinator is available
-                if self.coordinator:
-                    asyncio.create_task(self.coordinator.increase_update_speed())
+                _LOGGER.debug("Successfully turned off TV for player: %s", player_id)
+                # Set flag for faster updates instead of creating a task
+                self.needs_fast_updates = True
             else:
                 _LOGGER.error("Failed to turn off TV: %s", data.get("stat_message", "Unknown error"))
             return data
@@ -403,10 +404,9 @@ class PiSignageAPI:
             data = self._handle_request("post", f"pitv/{player_id}", json=payload, timeout=10)
             
             if data.get("success"):
-                _LOGGER.info("Successfully turned on TV for player: %s", player_id)
-                # Trigger faster updates if coordinator is available
-                if self.coordinator:
-                    asyncio.create_task(self.coordinator.increase_update_speed())
+                _LOGGER.debug("Successfully turned on TV for player: %s", player_id)
+                # Set flag for faster updates instead of creating a task
+                self.needs_fast_updates = True
             else:
                 _LOGGER.error("Failed to turn on TV: %s", data.get("stat_message", "Unknown error"))
             return data
@@ -422,10 +422,9 @@ class PiSignageAPI:
             data = self._handle_request("post", f"setplaylist/{player_id}/{playlist}", timeout=10)
             
             if data.get("success"):
-                _LOGGER.info("Successfully started playlist '%s' on player: %s", playlist, player_id)
-                # Trigger faster updates if coordinator is available
-                if self.coordinator:
-                    asyncio.create_task(self.coordinator.increase_update_speed())
+                _LOGGER.debug("Successfully started playlist '%s' on player: %s", playlist, player_id)
+                # Set flag for faster updates instead of creating a task
+                self.needs_fast_updates = True
             else:
                 _LOGGER.error("Failed to play playlist: %s", data.get("stat_message", "Unknown error"))
             return data
@@ -441,10 +440,9 @@ class PiSignageAPI:
             data = self._handle_request("post", f"playlistmedia/{player_id}/{action}", timeout=10)
         
             if data.get("success"):
-                _LOGGER.info("Successfully sent media control '%s' to player: %s", action, player_id)
-                # Trigger faster updates if coordinator is available
-                if self.coordinator:
-                    asyncio.create_task(self.coordinator.increase_update_speed())
+                _LOGGER.debug("Successfully sent media control '%s' to player: %s", action, player_id)
+                # Set flag for faster updates instead of creating a task
+                self.needs_fast_updates = True
             else:
                 _LOGGER.error("Failed to control media: %s", data.get("stat_message", "Unknown error"))
             return data
@@ -561,9 +559,8 @@ class PiSignageAPI:
             if result.get("success"):
                 _LOGGER.info("Successfully updated group %s to use playlist '%s'", 
                              group_id, playlist_name)
-                # Trigger faster updates if coordinator is available
-                if self.coordinator:
-                    asyncio.create_task(self.coordinator.increase_update_speed())
+                # Set flag for faster updates instead of creating a task
+                self.needs_fast_updates = True
             else:
                 _LOGGER.error("Failed to update group %s: %s", 
                               group_id, result.get("stat_message", "Unknown error"))
@@ -596,6 +593,12 @@ class PiSignageDataUpdateCoordinator(DataUpdateCoordinator):
         """Fetch data from PiSignage."""
         try:
             _LOGGER.debug("Performing data update")
+            
+            # Check if we need to switch to faster updates based on API flag
+            if self.api.needs_fast_updates:
+                self.api.needs_fast_updates = False
+                await self.increase_update_speed()
+            
             # Get playlists first
             self.playlists = await self.hass.async_add_executor_job(self.api.get_playlists)
             

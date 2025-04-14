@@ -102,8 +102,6 @@ class PiSignageBaseSensor(SensorEntity):
         player_found = any(p.get("_id") == self._player_id for p in players)
         return player_found and self.coordinator.last_update_success
     
-    # Remove async_update method - we're using coordinator
-
 
 class PiSignageStatusSensor(PiSignageBaseSensor):
     """Representation of a PiSignage status sensor."""
@@ -111,8 +109,6 @@ class PiSignageStatusSensor(PiSignageBaseSensor):
     def __init__(self, coordinator, player, config_entry):
         """Initialize the status sensor."""
         super().__init__(coordinator, player, "status")
-        # We don't need to store the config_entry explicitly anymore
-        # The reference is used directly from the media_player.py implementation
 
     @property
     def state(self) -> str:
@@ -156,7 +152,6 @@ class PiSignageStatusSensor(PiSignageBaseSensor):
             except (ValueError, AttributeError):
                 attrs[ATTR_LAST_SEEN] = last_seen
 
-        # Add additional attributes with user-friendly names
         attrs["Is Connected"] = self._player_data.get("isConnected", False)
         attrs["CEC Supported"] = self._player_data.get("isCecSupported", False)
         attrs["CEC TV Status"] = self._player_data.get("cecTvStatus", False)
@@ -182,7 +177,7 @@ class PiSignageStorageSensor(PiSignageBaseSensor):
         """Return the state of the sensor."""
         try:
             used_space_percentage = float(self._player_data.get("diskSpaceUsed", "0%").replace("%", ""))
-            return used_space_percentage  # Return used space percentage
+            return used_space_percentage
         except (ValueError, TypeError):
             return None
 
