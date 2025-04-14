@@ -111,6 +111,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Create update coordinator
     coordinator = PiSignageDataUpdateCoordinator(hass, api)
     
+    # Give API access to the coordinator for triggering updates
+    api.coordinator = coordinator
+    
     # Fetch initial data
     _LOGGER.debug("Performing initial data refresh")
     await coordinator.async_config_entry_first_refresh()
@@ -175,6 +178,7 @@ class PiSignageAPI:
         self.server_type = server_type
         self.token = None
         self.session = requests.Session()
+        self.coordinator = None  # Will be set after coordinator is created
         
         # For open source servers, configure basic auth directly
         if server_type == SERVER_TYPE_OPEN_SOURCE:
@@ -378,6 +382,9 @@ class PiSignageAPI:
             
             if data.get("success"):
                 _LOGGER.info("Successfully turned off TV for player: %s", player_id)
+                # Trigger faster updates if coordinator is available
+                if self.coordinator:
+                    asyncio.create_task(self.coordinator.increase_update_speed())
             else:
                 _LOGGER.error("Failed to turn off TV: %s", data.get("stat_message", "Unknown error"))
             return data
@@ -397,6 +404,9 @@ class PiSignageAPI:
             
             if data.get("success"):
                 _LOGGER.info("Successfully turned on TV for player: %s", player_id)
+                # Trigger faster updates if coordinator is available
+                if self.coordinator:
+                    asyncio.create_task(self.coordinator.increase_update_speed())
             else:
                 _LOGGER.error("Failed to turn on TV: %s", data.get("stat_message", "Unknown error"))
             return data
@@ -413,6 +423,9 @@ class PiSignageAPI:
             
             if data.get("success"):
                 _LOGGER.info("Successfully started playlist '%s' on player: %s", playlist, player_id)
+                # Trigger faster updates if coordinator is available
+                if self.coordinator:
+                    asyncio.create_task(self.coordinator.increase_update_speed())
             else:
                 _LOGGER.error("Failed to play playlist: %s", data.get("stat_message", "Unknown error"))
             return data
@@ -429,6 +442,9 @@ class PiSignageAPI:
         
             if data.get("success"):
                 _LOGGER.info("Successfully sent media control '%s' to player: %s", action, player_id)
+                # Trigger faster updates if coordinator is available
+                if self.coordinator:
+                    asyncio.create_task(self.coordinator.increase_update_speed())
             else:
                 _LOGGER.error("Failed to control media: %s", data.get("stat_message", "Unknown error"))
             return data
@@ -545,6 +561,9 @@ class PiSignageAPI:
             if result.get("success"):
                 _LOGGER.info("Successfully updated group %s to use playlist '%s'", 
                              group_id, playlist_name)
+                # Trigger faster updates if coordinator is available
+                if self.coordinator:
+                    asyncio.create_task(self.coordinator.increase_update_speed())
             else:
                 _LOGGER.error("Failed to update group %s: %s", 
                               group_id, result.get("stat_message", "Unknown error"))
@@ -569,6 +588,8 @@ class PiSignageDataUpdateCoordinator(DataUpdateCoordinator):
         )
         self.api = api
         self.playlists = []
+        self._normal_update_interval = timedelta(seconds=SCAN_INTERVAL_SECONDS)
+        self._rapid_polling_task = None
         _LOGGER.debug("Initialized PiSignage data coordinator with %d second update interval", SCAN_INTERVAL_SECONDS)
 
     async def _async_update_data(self):
@@ -634,3 +655,42 @@ class PiSignageDataUpdateCoordinator(DataUpdateCoordinator):
         except Exception as ex:
             _LOGGER.error("Unexpected error fetching pisignage data", exc_info=True)
             raise UpdateFailed(f"Unexpected error: {str(ex)}")
+
+    async def increase_update_speed(self, fast_interval_seconds=4, duration_seconds=60):
+        """Temporarily increase the update speed."""
+        _LOGGER.debug("Temporarily increasing update frequency to %d seconds for %d seconds", 
+                     fast_interval_seconds, duration_seconds)
+        
+        # Cancel any existing rapid polling task
+        if self._rapid_polling_task is not None:
+            self._rapid_polling_task.cancel()
+            
+        # Store current interval (in case it was already changed)
+        current_interval = self.update_interval
+        
+        # Set to faster interval
+        self.update_interval = timedelta(seconds=fast_interval_seconds)
+        
+        # Schedule a task to revert back to normal interval
+        self._rapid_polling_task = asyncio.create_task(
+            self._revert_polling_speed(duration_seconds, current_interval)
+        )
+    
+    async def _revert_polling_speed(self, delay_seconds, previous_interval):
+        """Revert polling speed after delay."""
+        try:
+            await asyncio.sleep(delay_seconds)
+            # If this is a rapid polling interval, revert to normal
+            if self.update_interval.total_seconds() < self._normal_update_interval.total_seconds():
+                self.update_interval = self._normal_update_interval
+                _LOGGER.debug("Reverted to normal update frequency (%d seconds)", 
+                            SCAN_INTERVAL_SECONDS)
+            else:
+                # Otherwise restore the previous interval (might have been changed elsewhere)
+                self.update_interval = previous_interval
+                _LOGGER.debug("Restored previous update interval")
+        except asyncio.CancelledError:
+            # Task was cancelled, probably because a new rapid polling started
+            pass
+        finally:
+            self._rapid_polling_task = None
