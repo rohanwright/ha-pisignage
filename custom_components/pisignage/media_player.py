@@ -144,10 +144,14 @@ class PiSignageMediaPlayer(MediaPlayerEntity):
     @property
     def available(self) -> bool:
         """Return if entity is available."""
-        # Get player data from coordinator directly
         players = self.coordinator.data.get(CONF_PLAYERS, [])
-        player_found = any(p.get("_id") == self._player_id for p in players)
-        return player_found and self.coordinator.last_update_success
+        player_data = next(
+            (p for p in players if p.get("_id") == self._player_id), None
+        )
+        if player_data is None:
+            return False
+        # Player must be connected to the PiSignage server to be available
+        return player_data.get("isConnected", False) and self.coordinator.last_update_success
 
     @property
     def _player_data(self):
@@ -165,9 +169,6 @@ class PiSignageMediaPlayer(MediaPlayerEntity):
             return self._optimistic_state
         
         player_data = self._player_data
-        
-        if not player_data.get("isConnected", False):
-            return STATE_OFF
 
         # Get the config entry directly from the hass context
         config_entry = self.hass.config_entries.async_get_entry(self.registry_entry.config_entry_id)
@@ -177,12 +178,7 @@ class PiSignageMediaPlayer(MediaPlayerEntity):
         cec_tv_status = player_data.get("cecTvStatus", False)
         playlist_on = player_data.get("playlistOn", False)
 
-        if not is_cec_supported:
-            if playlist_on:
-                return STATE_PLAYING
-            return STATE_IDLE
-
-        if not cec_tv_status:
+        if is_cec_supported and not cec_tv_status:
             return STATE_STANDBY
 
         if playlist_on:
@@ -241,7 +237,7 @@ class PiSignageMediaPlayer(MediaPlayerEntity):
             attrs[ATTR_CURRENT_FILE] = current_file
         
         if tv_status := player_data.get("tvStatus"):
-            attrs[ATTR_TV_STATUS] = "On" if tv_status == "1" else "Off"
+            attrs[ATTR_TV_STATUS] = "On" if tv_status else "Off"
             
         return attrs
 
