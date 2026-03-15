@@ -115,20 +115,29 @@ class PiSignageStatusSensor(PiSignageBaseSensor):
         """Return the state of the sensor."""
         player_data = self._player_data
         is_connected = player_data.get("isConnected", False)
-        
-        # Access the config_entry directly from the hass context to avoid deprecation warnings
-        config_entry = self.hass.config_entries.async_get_entry(self.registry_entry.config_entry_id)
-        ignore_cec = config_entry.options.get(CONF_IGNORE_CEC, {}).get(self._player_id, False)
-        
-        is_cec_supported = player_data.get("isCecSupported", False) and not ignore_cec
-        cec_tv_status = player_data.get("cecTvStatus", False)
+
+        config_entry = self.hass.config_entries.async_get_entry(
+            self.registry_entry.config_entry_id
+        )
+        ignore_cec = config_entry.options.get(CONF_IGNORE_CEC, {}).get(
+            self._player_id, False
+        )
+
         playlist_on = player_data.get("playlistOn", False)
 
         if not is_connected:
             return "Offline"
-        if not is_cec_supported:
+
+        if ignore_cec:
+            # CEC is unreliable for this player, use only playlistOn
             return "Playing (No CEC)" if playlist_on else "Not Playing (No CEC)"
-        if not cec_tv_status:
+
+        # tvStatus reflects the commanded TV state (updates immediately):
+        #   true  = TV output is active (on)
+        #   false = TV output is off/blanked
+        tv_status = player_data.get("tvStatus", True)
+
+        if not tv_status:
             return "TV Powered Off"
         if playlist_on:
             return "Playing"

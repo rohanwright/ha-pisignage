@@ -151,11 +151,20 @@ class PiSignageMediaPlayer(MediaPlayerEntity):
             self._player_id, False
         )
 
-        is_cec_supported = player_data.get("isCecSupported", False) and not ignore_cec
-        cec_tv_status = player_data.get("cecTvStatus", False)
         playlist_on = player_data.get("playlistOn", False)
 
-        if is_cec_supported and not cec_tv_status:
+        if ignore_cec:
+            # CEC is unreliable for this player (e.g. splitter/converter),
+            # so skip tvStatus and use only playlistOn
+            return STATE_PLAYING if playlist_on else STATE_IDLE
+
+        # tvStatus reflects the commanded TV state and updates immediately:
+        #   true  = TV output is active (on)
+        #   false = TV output is off/blanked
+        tv_status = player_data.get("tvStatus", True)
+
+        if not tv_status:
+            # TV has been commanded off
             return STATE_STANDBY
         if playlist_on:
             return STATE_PLAYING
