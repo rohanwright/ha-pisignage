@@ -3,12 +3,12 @@ import asyncio
 import logging
 from datetime import timedelta
 
-import requests
-from requests.exceptions import ConnectionError, HTTPError, Timeout
+import aiohttp
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import (
     DataUpdateCoordinator,
     UpdateFailed,
@@ -93,26 +93,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     username = entry.data[CONF_USERNAME]
     password = entry.data[CONF_PASSWORD]
 
-    # Create API client
-    api = PiSignageAPI(api_server, username, password, server_type)
+    # Create API client using HA's managed aiohttp session
+    session = async_get_clientsession(hass)
+    api = PiSignageAPI(api_server, username, password, server_type, session)
     
     # Verify authentication
     try:
         _LOGGER.debug("Authenticating with PiSignage server")
-        auth_success = await hass.async_add_executor_job(api.authenticate)
+        auth_success = await api.authenticate()
         if not auth_success:
             _LOGGER.error("Authentication to PiSignage server failed")
             raise ConfigEntryNotReady("Authentication to PiSignage failed")
         _LOGGER.debug("Successfully authenticated with PiSignage server")
-    except (ConnectionError, HTTPError, Timeout) as ex:
+    except (aiohttp.ClientError, asyncio.TimeoutError) as ex:
         _LOGGER.error("Error connecting to PiSignage server: %s", ex)
         raise ConfigEntryNotReady(f"Error connecting to PiSignage: {ex}")
 
     # Create update coordinator
     coordinator = PiSignageDataUpdateCoordinator(hass, api)
-    
-    # Give API access to the coordinator for triggering updates
-    api.coordinator = coordinator
     
     # Fetch initial data
     _LOGGER.debug("Performing initial data refresh")
@@ -168,44 +166,45 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 class PiSignageAPI:
-    """API client for PiSignage."""
+    """Async API client for PiSignage using aiohttp."""
 
-    def __init__(self, api_server, username, password, server_type):
+    def __init__(self, api_server, username, password, server_type, session: aiohttp.ClientSession):
         """Initialize the API client."""
         self.api_server = api_server
         self.username = username
         self.password = password
         self.server_type = server_type
+        self.session = session
         self.token = None
-        self.session = requests.Session()
-        self.coordinator = None 
-        self.needs_fast_updates = False
         
-        # For open source servers, configure basic auth directly
+        # Build basic auth for open source servers
+        self._basic_auth = None
         if server_type == SERVER_TYPE_OPEN_SOURCE:
-            self.session.auth = (username, password)
+            self._basic_auth = aiohttp.BasicAuth(username, password)
         
         _LOGGER.debug("Initialized PiSignage API client for %s (type: %s)", api_server, server_type)
 
-    def authenticate(self):
+    async def authenticate(self):
         """Authenticate with the PiSignage server."""
         _LOGGER.debug("Attempting to authenticate with PiSignage server: %s", self.api_server)
         
         # For open source server, we use basic authentication - no token needed
         if self.server_type == SERVER_TYPE_OPEN_SOURCE:
             try:
-                # Just perform a simple GET request to verify credentials
-                response = self.session.get(f"{self.api_server}/players", timeout=10)
-                response.raise_for_status()
-                _LOGGER.debug("Open source server authentication successful")
-                return True
-            except requests.exceptions.RequestException as ex:
+                async with self.session.get(
+                    f"{self.api_server}/players",
+                    auth=self._basic_auth,
+                    timeout=aiohttp.ClientTimeout(total=10),
+                ) as response:
+                    response.raise_for_status()
+                    _LOGGER.debug("Open source server authentication successful")
+                    return True
+            except (aiohttp.ClientError, asyncio.TimeoutError) as ex:
                 _LOGGER.error("Open source server authentication failed: %s", ex)
                 return False
         
         # For hosted service, use token-based authentication
         try:
-            # Format authentication payload according to API docs
             auth_payload = {
                 "email": self.username,
                 "password": self.password,
@@ -215,249 +214,231 @@ class PiSignageAPI:
             _LOGGER.debug("Sending authentication request with payload: %s", 
                          {**auth_payload, "password": "***REDACTED***"})
             
-            response = self.session.post(
+            async with self.session.post(
                 f"{self.api_server}/session",
                 json=auth_payload,
-                timeout=10,
-            )
-            
-            _LOGGER.debug("Got response status code: %s", response.status_code)
-            
-            # Check for non-200 status code
-            response.raise_for_status()
-            
-            # Parse response
-            data = response.json()
-            _LOGGER.debug("Authentication response: %s", 
-                         {k: v for k, v in data.items() if k != "data"})
-            
-            # Check for various success indicators
-            if data.get("token"):
-                self.token = data.get("token")
-                _LOGGER.debug("Authentication successful, token received")
-                return True
-            elif data.get("success") is False:
-                _LOGGER.error("Authentication failed: %s", data.get("stat_message", "Unknown error"))
-            else:
-                _LOGGER.error("Authentication failed: Unexpected response format")
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as response:
+                _LOGGER.debug("Got response status code: %s", response.status)
                 
-            return False
-        except requests.exceptions.JSONDecodeError as ex:
+                response.raise_for_status()
+                data = await response.json()
+                
+                _LOGGER.debug("Authentication response: %s", 
+                             {k: v for k, v in data.items() if k != "data"})
+                
+                if data.get("token"):
+                    self.token = data.get("token")
+                    _LOGGER.debug("Authentication successful, token received")
+                    return True
+                elif data.get("success") is False:
+                    _LOGGER.error("Authentication failed: %s", data.get("stat_message", "Unknown error"))
+                else:
+                    _LOGGER.error("Authentication failed: Unexpected response format")
+                    
+                return False
+        except aiohttp.ContentTypeError as ex:
             _LOGGER.error("Failed to decode JSON response from server: %s", str(ex))
-            _LOGGER.debug("Response content: %s", response.text if 'response' in locals() else "No response")
             raise
-        except requests.exceptions.RequestException as ex:
+        except (aiohttp.ClientError, asyncio.TimeoutError) as ex:
             _LOGGER.error("Error during authentication: %s", ex)
             raise
 
-    def _handle_request(self, method, endpoint, **kwargs):
+    async def _handle_request(self, method, endpoint, **kwargs):
         """Handle API request with token expiration check and retry logic."""
-        # Only handle tokens for hosted service
+        # Add auth for open source servers
+        if self.server_type == SERVER_TYPE_OPEN_SOURCE:
+            kwargs["auth"] = self._basic_auth
+        
+        # Handle tokens for hosted service
         if self.server_type == SERVER_TYPE_HOSTED:
-            # Ensure we have a token
             if not self.token:
                 _LOGGER.debug("No auth token, authenticating first")
-                if not self.authenticate():
+                if not await self.authenticate():
                     _LOGGER.error("Authentication failed")
                     raise ConnectionError("Authentication failed")
                 
             # For GET requests, add token as query parameter
-            if method == "get" and "params" in kwargs:
-                kwargs["params"]["token"] = self.token
-            elif method == "get":
-                kwargs["params"] = {"token": self.token}
+            if method == "get":
+                params = kwargs.get("params", {})
+                params["token"] = self.token
+                kwargs["params"] = params
             
             # For POST requests, add token to JSON body
             if method == "post":
                 if "json" in kwargs:
-                    # Add token to existing JSON payload
                     kwargs["json"]["token"] = self.token
                 elif "data" not in kwargs:
-                    # No payload but need token - use empty JSON object
                     kwargs["json"] = {"token": self.token}
-        elif self.server_type == SERVER_TYPE_OPEN_SOURCE and method == "post" and "json" not in kwargs and "data" not in kwargs:
-            # For open source POST requests with no body specified, don't add an empty one
-            pass
         
-        # Execute request and handle response
+        # Set default timeout
+        if "timeout" not in kwargs:
+            kwargs["timeout"] = aiohttp.ClientTimeout(total=10)
+        else:
+            timeout_val = kwargs["timeout"]
+            if isinstance(timeout_val, (int, float)):
+                kwargs["timeout"] = aiohttp.ClientTimeout(total=timeout_val)
+        
+        url = f"{self.api_server}/{endpoint}"
+        
         try:
-            # Send the actual request to the API
             if method == "get":
-                response = self.session.get(f"{self.api_server}/{endpoint}", **kwargs)
+                async with self.session.get(url, **kwargs) as response:
+                    response.raise_for_status()
+                    return await response.json()
             else:  # post
-                response = self.session.post(f"{self.api_server}/{endpoint}", **kwargs)
-                
-            response.raise_for_status()
-            return response.json()
-            
-        except requests.exceptions.HTTPError as ex:
+                async with self.session.post(url, **kwargs) as response:
+                    response.raise_for_status()
+                    return await response.json()
+                    
+        except aiohttp.ClientResponseError as ex:
             # Token expired handling - attempt reauthentication for 401/403 errors
-            if self.server_type == SERVER_TYPE_HOSTED and ex.response.status_code in (401, 403):
-                _LOGGER.warning("Request failed with 401/403, token might be expired. Reauthenticating...")
+            if self.server_type == SERVER_TYPE_HOSTED and ex.status in (401, 403):
+                _LOGGER.warning("Request failed with %s, token might be expired. Reauthenticating...", ex.status)
                 
-                # Try to authenticate again
-                if self.authenticate():
+                if await self.authenticate():
                     _LOGGER.debug("Reauthentication successful, retrying request")
                     
                     # Update token in request and retry
-                    if method == "get" and "params" in kwargs:
-                        kwargs["params"]["token"] = self.token
-                    elif method == "get":
-                        kwargs["params"] = {"token": self.token}
-                        
+                    if method == "get":
+                        params = kwargs.get("params", {})
+                        params["token"] = self.token
+                        kwargs["params"] = params
                     if method == "post" and "json" in kwargs:
                         kwargs["json"]["token"] = self.token
                     elif method == "post" and "data" not in kwargs:
                         kwargs["json"] = {"token": self.token}
                     
-                    # Execute request again
                     if method == "get":
-                        retry_response = self.session.get(f"{self.api_server}/{endpoint}", **kwargs)
-                    else:  # post
-                        retry_response = self.session.post(f"{self.api_server}/{endpoint}", **kwargs)
-                        
-                    retry_response.raise_for_status()
-                    return retry_response.json()
+                        async with self.session.get(url, **kwargs) as retry_response:
+                            retry_response.raise_for_status()
+                            return await retry_response.json()
+                    else:
+                        async with self.session.post(url, **kwargs) as retry_response:
+                            retry_response.raise_for_status()
+                            return await retry_response.json()
                 else:
                     _LOGGER.error("Reauthentication failed")
                     raise ConnectionError("Reauthentication failed")
             else:
-                # Not a token issue, re-raise
                 raise
                 
-    def get_players(self):
+    async def get_players(self):
         """Get list of players."""
         _LOGGER.debug("Fetching players list from PiSignage server")
         
         try:
-            data = self._handle_request("get", "players", timeout=10)
+            data = await self._handle_request("get", "players", timeout=10)
             
-            # Process the response
             if data.get("success"):
                 players = data.get("data", [])
                 _LOGGER.debug("Retrieved %d players from server", len(players))
                 return players
             elif isinstance(data, list):
-                # Direct array of players without the success wrapper
                 _LOGGER.debug("Retrieved %d players from server (direct format)", len(data))
                 return data
             else:
                 _LOGGER.error("Failed to get players: %s", data.get("stat_message", "Unknown response format"))
                 _LOGGER.debug("Unexpected players response format: %s", data)
             return []
-        except requests.exceptions.RequestException as ex:
+        except (aiohttp.ClientError, asyncio.TimeoutError) as ex:
             _LOGGER.error("Error fetching players: %s", ex)
             raise
 
-    def get_player(self, player_id):
+    async def get_player(self, player_id):
         """Get player details."""
         _LOGGER.debug("Fetching details for player: %s", player_id)
         
         try:
-            data = self._handle_request("get", f"players/{player_id}", timeout=10)
+            data = await self._handle_request("get", f"players/{player_id}", timeout=10)
             
-            # Process the response
             if data.get("success"):
                 _LOGGER.debug("Successfully retrieved details for player: %s", player_id)
                 return data.get("data", {})
             elif isinstance(data, dict) and "_id" in data:
-                # Direct player data without success wrapper
                 _LOGGER.debug("Successfully retrieved details for player: %s (direct format)", player_id)
                 return data
             else:
                 _LOGGER.error("Failed to get player details: %s", data.get("stat_message", "Unknown error"))
                 _LOGGER.debug("Unexpected player details response format: %s", data)
             return {}
-        except requests.exceptions.RequestException as ex:
+        except (aiohttp.ClientError, asyncio.TimeoutError) as ex:
             _LOGGER.error("Error fetching player details: %s", ex)
             raise
 
-    def tv_off(self, player_id):
+    async def tv_off(self, player_id):
         """Turn TV off."""
         _LOGGER.debug("Turning off TV for player: %s", player_id)
         
         try:
-            # Prepare payload without token (will be added by _handle_request for hosted service)
             payload = {"status": True}
-            
-            data = self._handle_request("post", f"pitv/{player_id}", json=payload, timeout=10)
+            data = await self._handle_request("post", f"pitv/{player_id}", json=payload, timeout=10)
             
             if data.get("success"):
                 _LOGGER.debug("Successfully turned off TV for player: %s", player_id)
-                # Set flag for faster updates instead of creating a task
-                self.needs_fast_updates = True
             else:
                 _LOGGER.error("Failed to turn off TV: %s", data.get("stat_message", "Unknown error"))
             return data
-        except requests.exceptions.RequestException as ex:
+        except (aiohttp.ClientError, asyncio.TimeoutError) as ex:
             _LOGGER.error("Error turning off TV: %s", ex)
             raise
 
-    def tv_on(self, player_id):
+    async def tv_on(self, player_id):
         """Turn TV on."""
         _LOGGER.debug("Turning on TV for player: %s", player_id)
         
         try:
-            # Prepare payload without token (will be added by _handle_request for hosted service)
             payload = {"status": False}
-            
-            data = self._handle_request("post", f"pitv/{player_id}", json=payload, timeout=10)
+            data = await self._handle_request("post", f"pitv/{player_id}", json=payload, timeout=10)
             
             if data.get("success"):
                 _LOGGER.debug("Successfully turned on TV for player: %s", player_id)
-                # Set flag for faster updates instead of creating a task
-                self.needs_fast_updates = True
             else:
                 _LOGGER.error("Failed to turn on TV: %s", data.get("stat_message", "Unknown error"))
             return data
-        except requests.exceptions.RequestException as ex:
+        except (aiohttp.ClientError, asyncio.TimeoutError) as ex:
             _LOGGER.error("Error turning on TV: %s", ex)
             raise
 
-    def play_playlist(self, player_id, playlist):
+    async def play_playlist(self, player_id, playlist):
         """Play a specific playlist."""
         _LOGGER.debug("Playing playlist '%s' on player: %s", playlist, player_id)
         
         try:
-            data = self._handle_request("post", f"setplaylist/{player_id}/{playlist}", timeout=10)
+            data = await self._handle_request("post", f"setplaylist/{player_id}/{playlist}", timeout=10)
             
             if data.get("success"):
                 _LOGGER.debug("Successfully started playlist '%s' on player: %s", playlist, player_id)
-                # Set flag for faster updates instead of creating a task
-                self.needs_fast_updates = True
             else:
                 _LOGGER.error("Failed to play playlist: %s", data.get("stat_message", "Unknown error"))
             return data
-        except requests.exceptions.RequestException as ex:
+        except (aiohttp.ClientError, asyncio.TimeoutError) as ex:
             _LOGGER.error("Error playing playlist: %s", ex)
             raise
 
-    def media_control(self, player_id, action):
+    async def media_control(self, player_id, action):
         """Control media playback."""
         _LOGGER.debug("Sending media control '%s' to player: %s", action, player_id)
         
         try:
-            data = self._handle_request("post", f"playlistmedia/{player_id}/{action}", timeout=10)
+            data = await self._handle_request("post", f"playlistmedia/{player_id}/{action}", timeout=10)
         
             if data.get("success"):
                 _LOGGER.debug("Successfully sent media control '%s' to player: %s", action, player_id)
-                # Set flag for faster updates instead of creating a task
-                self.needs_fast_updates = True
             else:
                 _LOGGER.error("Failed to control media: %s", data.get("stat_message", "Unknown error"))
             return data
-        except requests.exceptions.RequestException as ex:
+        except (aiohttp.ClientError, asyncio.TimeoutError) as ex:
             _LOGGER.error("Error controlling media: %s", ex)
             raise
 
-    def get_playlists(self):
+    async def get_playlists(self):
         """Get list of playlists."""
         _LOGGER.debug("Fetching playlists from PiSignage server")
         
         try:
-            data = self._handle_request("get", "playlists", timeout=10)
+            data = await self._handle_request("get", "playlists", timeout=10)
             
-            # Log the raw response structure for debugging
             if isinstance(data, dict):
                 _LOGGER.debug("Playlists response has keys: %s", list(data.keys()))
             elif isinstance(data, list):
@@ -470,30 +451,29 @@ class PiSignageAPI:
                 _LOGGER.debug("Retrieved %d playlists from server", len(playlists))
                 return playlists
             elif isinstance(data, list):
-                # Direct array of playlists without success wrapper
                 _LOGGER.debug("Retrieved %d playlists from server (direct format)", len(data))
                 return data
             else:
                 _LOGGER.error("Failed to get playlists: %s", data.get("stat_message", "Unknown error"))
                 _LOGGER.debug("Unexpected playlists response format: %s", data)
             return []
-        except requests.exceptions.RequestException as ex:
+        except (aiohttp.ClientError, asyncio.TimeoutError) as ex:
             _LOGGER.error("Error fetching playlists: %s", ex)
             raise
 
-    def update_group_playlist(self, group_id, playlist_name):
+    async def update_group_playlist(self, group_id, playlist_name):
         """Update the default playlist for a group."""
         _LOGGER.debug("Updating group %s to use playlist %s", group_id, playlist_name)
         
-        # Safety check to prevent setting TV_OFF playlist for groups so when we power on, the original playlist will ressume
+        # Safety check to prevent setting TV_OFF playlist for groups
         if playlist_name == "TV_OFF":
             _LOGGER.debug("Attempted to set TV_OFF playlist for group %s, Ignored change", group_id)
             return {"success": False, "stat_message": "Cannot set TV_OFF playlist for groups"}
 
         try:
             # Fetch required data
-            group_data = self._handle_request("get", f"groups/{group_id}", timeout=10)
-            playlists_data = self._handle_request("get", "playlists", timeout=10)
+            group_data = await self._handle_request("get", f"groups/{group_id}", timeout=10)
+            playlists_data = await self._handle_request("get", "playlists", timeout=10)
             
             # Handle different response structures
             if isinstance(group_data, dict) and group_data.get("success") and "data" in group_data:
@@ -533,16 +513,11 @@ class PiSignageAPI:
             
             for playlist in all_playlists:
                 if playlist.get("name") in playlist_names:
-                    # Add asset filenames
                     asset_names.update(
                         asset["filename"] for asset in playlist.get("assets", [])
                         if "filename" in asset
                     )
-                    
-                    # Add playlist JSON file
                     asset_names.add(f"__{playlist.get('name')}.json")
-                    
-                    # Add template if present
                     if template := playlist.get("templateName"):
                         asset_names.add(template)
             
@@ -554,20 +529,18 @@ class PiSignageAPI:
             }
             
             # Send update
-            result = self._handle_request("post", f"groups/{group_id}", json=update_data, timeout=10)
+            result = await self._handle_request("post", f"groups/{group_id}", json=update_data, timeout=10)
             
             if result.get("success"):
                 _LOGGER.info("Successfully updated group %s to use playlist '%s'", 
                              group_id, playlist_name)
-                # Set flag for faster updates instead of creating a task
-                self.needs_fast_updates = True
             else:
                 _LOGGER.error("Failed to update group %s: %s", 
                               group_id, result.get("stat_message", "Unknown error"))
             
             return result
             
-        except requests.exceptions.RequestException as ex:
+        except (aiohttp.ClientError, asyncio.TimeoutError) as ex:
             _LOGGER.error("Error updating playlist for group %s: %s", group_id, ex)
             raise
 
@@ -585,8 +558,6 @@ class PiSignageDataUpdateCoordinator(DataUpdateCoordinator):
         )
         self.api = api
         self.playlists = []
-        self._normal_update_interval = timedelta(seconds=SCAN_INTERVAL_SECONDS)
-        self._rapid_polling_task = None
         _LOGGER.debug("Initialized PiSignage data coordinator with %d second update interval", SCAN_INTERVAL_SECONDS)
 
     async def _async_update_data(self):
@@ -594,18 +565,12 @@ class PiSignageDataUpdateCoordinator(DataUpdateCoordinator):
         try:
             _LOGGER.debug("Performing data update")
             
-            # Check if we need to switch to faster updates based on API flag
-            if self.api.needs_fast_updates:
-                self.api.needs_fast_updates = False
-                await self.increase_update_speed()
-            
             # Get playlists first
-            self.playlists = await self.hass.async_add_executor_job(self.api.get_playlists)
+            self.playlists = await self.api.get_playlists()
             
             # Get players
-            raw_players_data = await self.hass.async_add_executor_job(self.api.get_players)
+            raw_players_data = await self.api.get_players()
             
-            # Check if we got the players data directly or need to process it
             if not raw_players_data:
                 _LOGGER.warning("No player data received")
                 return {
@@ -613,22 +578,17 @@ class PiSignageDataUpdateCoordinator(DataUpdateCoordinator):
                     "playlists": self.playlists
                 }
             
-            # The API returns data in a nested structure
             # Extract actual player objects from the nested array
             player_objects = []
             
             if isinstance(raw_players_data, list):
-                # Direct array of players
                 player_objects = raw_players_data
             elif isinstance(raw_players_data, dict) and "objects" in raw_players_data:
-                # Players are in the "objects" property
                 player_objects = raw_players_data["objects"]
             elif isinstance(raw_players_data, dict) and "data" in raw_players_data:
                 if isinstance(raw_players_data["data"], dict) and "objects" in raw_players_data["data"]:
-                    # Nested structure: data.data.objects contains player array
                     player_objects = raw_players_data["data"]["objects"]
                 elif isinstance(raw_players_data["data"], list):
-                    # Structure: data.data is a player array
                     player_objects = raw_players_data["data"]
             
             _LOGGER.debug("Processing %d player objects", len(player_objects))
@@ -643,7 +603,6 @@ class PiSignageDataUpdateCoordinator(DataUpdateCoordinator):
             
             _LOGGER.debug("Data update completed successfully with %d players", len(processed_players))
             
-            # Log more detailed information about the data structure we're returning
             _LOGGER.debug("Player data structure samples: %s", 
                         str({p.get("_id"): {k: v for k, v in p.items() if k in ["isConnected", "playlistOn", "currentPlaylist"]}
                              for p in processed_players[:2]}) if processed_players else "No players")
@@ -652,48 +611,9 @@ class PiSignageDataUpdateCoordinator(DataUpdateCoordinator):
                 CONF_PLAYERS: processed_players,
                 "playlists": self.playlists
             }
-        except (ConnectionError, HTTPError, Timeout) as ex:
+        except (aiohttp.ClientError, asyncio.TimeoutError) as ex:
             _LOGGER.error("Error while updating data: %s", ex)
             raise UpdateFailed(f"Error communicating with PiSignage: {ex}")
         except Exception as ex:
             _LOGGER.error("Unexpected error fetching pisignage data", exc_info=True)
             raise UpdateFailed(f"Unexpected error: {str(ex)}")
-
-    async def increase_update_speed(self, fast_interval_seconds=4, duration_seconds=60):
-        """Temporarily increase the update speed."""
-        _LOGGER.debug("Temporarily increasing update frequency to %d seconds for %d seconds", 
-                     fast_interval_seconds, duration_seconds)
-        
-        # Cancel any existing rapid polling task
-        if self._rapid_polling_task is not None:
-            self._rapid_polling_task.cancel()
-            
-        # Store current interval (in case it was already changed)
-        current_interval = self.update_interval
-        
-        # Set to faster interval
-        self.update_interval = timedelta(seconds=fast_interval_seconds)
-        
-        # Schedule a task to revert back to normal interval
-        self._rapid_polling_task = asyncio.create_task(
-            self._revert_polling_speed(duration_seconds, current_interval)
-        )
-    
-    async def _revert_polling_speed(self, delay_seconds, previous_interval):
-        """Revert polling speed after delay."""
-        try:
-            await asyncio.sleep(delay_seconds)
-            # If this is a rapid polling interval, revert to normal
-            if self.update_interval.total_seconds() < self._normal_update_interval.total_seconds():
-                self.update_interval = self._normal_update_interval
-                _LOGGER.debug("Reverted to normal update frequency (%d seconds)", 
-                            SCAN_INTERVAL_SECONDS)
-            else:
-                # Otherwise restore the previous interval (might have been changed elsewhere)
-                self.update_interval = previous_interval
-                _LOGGER.debug("Restored previous update interval")
-        except asyncio.CancelledError:
-            # Task was cancelled, probably because a new rapid polling started
-            pass
-        finally:
-            self._rapid_polling_task = None

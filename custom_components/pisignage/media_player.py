@@ -1,4 +1,5 @@
 """Support for PiSignage media players."""
+import asyncio
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -32,6 +33,9 @@ from .const import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+# Delay before confirmation refresh after an action (seconds)
+CONFIRMATION_REFRESH_DELAY = 5
 
 SUPPORT_PISIGNAGE = (
     MediaPlayerEntityFeature.TURN_ON
@@ -78,13 +82,34 @@ class PiSignageMediaPlayer(MediaPlayerEntity):
         self._update_sources()
         coordinator.async_add_listener(self._update_sources)
         self._attr_should_poll = False
+        
+        # Optimistic state tracking
+        self._optimistic_state = None
+        self._optimistic_source = None
+        self._confirmation_task = None
+        
         _LOGGER.debug("Initialized PiSignage media player entity: %s", self._name)
 
     async def async_added_to_hass(self):
         """When entity is added to hass."""
         self.async_on_remove(
-            self.coordinator.async_add_listener(self.async_write_ha_state)
+            self.coordinator.async_add_listener(self._handle_coordinator_update)
         )
+
+    def _handle_coordinator_update(self):
+        """Handle updated data from the coordinator."""
+        # Clear optimistic state when real data arrives
+        self._optimistic_state = None
+        self._optimistic_source = None
+        self.async_write_ha_state()
+
+    async def _async_delayed_refresh(self):
+        """Schedule a delayed coordinator refresh to confirm state."""
+        try:
+            await asyncio.sleep(CONFIRMATION_REFRESH_DELAY)
+            await self.coordinator.async_request_refresh()
+        except asyncio.CancelledError:
+            pass
 
     @property
     def device_info(self):
@@ -135,6 +160,10 @@ class PiSignageMediaPlayer(MediaPlayerEntity):
     @property
     def state(self) -> str:
         """Return the state of the device."""
+        # Return optimistic state if set (before server confirms)
+        if self._optimistic_state is not None:
+            return self._optimistic_state
+        
         player_data = self._player_data
         
         if not player_data.get("isConnected", False):
@@ -174,6 +203,8 @@ class PiSignageMediaPlayer(MediaPlayerEntity):
     @property
     def source(self) -> Optional[str]:
         """Return the current playlist."""
+        if self._optimistic_source is not None:
+            return self._optimistic_source
         return self._player_data.get("currentPlaylist")
 
     @property
@@ -214,64 +245,62 @@ class PiSignageMediaPlayer(MediaPlayerEntity):
             
         return attrs
 
+    def _set_optimistic_state(self, state, source=None):
+        """Set optimistic state and schedule a delayed confirmation refresh."""
+        self._optimistic_state = state
+        if source is not None:
+            self._optimistic_source = source
+        self.async_write_ha_state()
+        
+        # Cancel any existing confirmation task
+        if self._confirmation_task is not None:
+            self._confirmation_task.cancel()
+        # Schedule a delayed refresh to confirm actual state from server
+        self._confirmation_task = asyncio.create_task(self._async_delayed_refresh())
+
     async def async_turn_on(self) -> None:
         """Turn the device on."""
         _LOGGER.debug("Turning on TV for player %s", self._name)
-        await self.hass.async_add_executor_job(
-            self.api.tv_on, self._player_id
-        )
-        await self.coordinator.async_request_refresh()
+        await self.api.tv_on(self._player_id)
+        self._set_optimistic_state(STATE_IDLE)
 
     async def async_turn_off(self) -> None:
         """Turn the device off."""
         _LOGGER.debug("Turning off TV for player %s", self._name)
-        await self.hass.async_add_executor_job(
-            self.api.tv_off, self._player_id
-        )
-        await self.coordinator.async_request_refresh()
+        await self.api.tv_off(self._player_id)
+        self._set_optimistic_state(STATE_STANDBY)
 
     async def async_media_play(self) -> None:
         """Send play command."""
         _LOGGER.debug("Sending play command to player %s", self._name)
-        await self.hass.async_add_executor_job(
-            self.api.media_control, self._player_id, "play"
-        )
-        await self.coordinator.async_request_refresh()
+        await self.api.media_control(self._player_id, "play")
+        self._set_optimistic_state(STATE_PLAYING)
 
     async def async_media_pause(self) -> None:
         """Send pause command."""
         _LOGGER.debug("Sending pause command to player %s", self._name)
-        await self.hass.async_add_executor_job(
-            self.api.media_control, self._player_id, "pause"
-        )
-        await self.coordinator.async_request_refresh()
+        await self.api.media_control(self._player_id, "pause")
+        self._set_optimistic_state(STATE_PAUSED)
 
     async def async_media_next_track(self) -> None:
         """Send next track command."""
         _LOGGER.debug("Sending next track command to player %s", self._name)
-        await self.hass.async_add_executor_job(
-            self.api.media_control, self._player_id, "forward"
-        )
-        await self.coordinator.async_request_refresh()
+        await self.api.media_control(self._player_id, "forward")
+        self._set_optimistic_state(STATE_PLAYING)
 
     async def async_media_previous_track(self) -> None:
         """Send previous track command."""
         _LOGGER.debug("Sending previous track command to player %s", self._name)
-        await self.hass.async_add_executor_job(
-            self.api.media_control, self._player_id, "backward"
-        )
-        await self.coordinator.async_request_refresh()
+        await self.api.media_control(self._player_id, "backward")
+        self._set_optimistic_state(STATE_PLAYING)
 
     async def async_play_media(
         self, media_type: str, media_id: str, **kwargs: Any
     ) -> None:
         """Play a piece of media."""
-        # In this case, media_id is the playlist name
         _LOGGER.debug("Playing playlist '%s' on player %s", media_id, self._name)
-        await self.hass.async_add_executor_job(
-            self.api.play_playlist, self._player_id, media_id
-        )
-        await self.coordinator.async_request_refresh()
+        await self.api.play_playlist(self._player_id, media_id)
+        self._set_optimistic_state(STATE_PLAYING, source=media_id)
 
     async def async_select_source(self, source: str) -> None:
         """Select playlist to play."""
@@ -281,7 +310,5 @@ class PiSignageMediaPlayer(MediaPlayerEntity):
             _LOGGER.error("No group assigned to player %s", self._name)
             return
 
-        await self.hass.async_add_executor_job(
-            self.api.update_group_playlist, group_id, source
-        )
-        await self.coordinator.async_request_refresh()
+        await self.api.update_group_playlist(group_id, source)
+        self._set_optimistic_state(STATE_PLAYING, source=source)

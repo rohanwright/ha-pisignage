@@ -1,10 +1,10 @@
 """Config flow for PiSignage integration."""
+import asyncio
 import logging
 import voluptuous as vol
 from typing import Any, Dict, Optional
 
-import requests
-from requests.exceptions import ConnectionError, HTTPError, Timeout
+import aiohttp
 
 from homeassistant import config_entries
 from homeassistant.core import callback
@@ -16,6 +16,7 @@ from homeassistant.const import (
 )
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers import selector
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import (
     DOMAIN,
@@ -111,8 +112,8 @@ class PiSignageConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
             # Test connection
             try:
-                response = await self.hass.async_add_executor_job(
-                    self._test_connection, api_url, username, password, server_type
+                response = await self._async_test_connection(
+                    api_url, username, password, server_type
                 )
                 
                 if response and response.get("success"):
@@ -128,35 +129,28 @@ class PiSignageConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     error_message = response.get("message", "") if response else ""
                     _LOGGER.error("Authentication failed: %s", error_message)
                     errors["base"] = "auth_failed"
-            except ConnectionError:
-                errors["base"] = "cannot_connect"
-            except Timeout:
-                errors["base"] = "timeout_connect"
-            except HTTPError as http_err:
-                if http_err.response.status_code == 401:
-                    # Try to parse the response to check for OTP requirement or other error
-                    try:
-                        error_data = http_err.response.json()
-                        _LOGGER.debug("401 response content: %s", error_data)
-                        
+            except aiohttp.ClientResponseError as http_err:
+                if http_err.status == 401:
+                    # Try to check stored response data for OTP requirement
+                    if hasattr(http_err, '_response_data'):
+                        error_data = http_err._response_data
                         if error_data.get("message") == "OTP needed":
-                            # OTP is required, proceed to OTP step
                             return await self.async_step_otp()
+                        error_message = error_data.get("message", "")
+                        if "not registered" in error_message.lower():
+                            errors["base"] = "invalid_user"
+                        elif "incorrect password" in error_message.lower():
+                            errors["base"] = "invalid_password"
                         else:
-                            # Handle specific error messages
-                            error_message = error_data.get("message", "")
-                            if "not registered" in error_message.lower():
-                                errors["base"] = "invalid_user"
-                            elif "incorrect password" in error_message.lower():
-                                errors["base"] = "invalid_password"
-                            else:
-                                errors["base"] = "auth_failed"
-                            _LOGGER.error("Authentication error: %s", error_message)
-                    except Exception as ex:
-                        _LOGGER.error("Error parsing 401 response: %s", str(ex))
+                            errors["base"] = "auth_failed"
+                    else:
                         errors["base"] = "auth_failed"
                 else:
                     errors["base"] = "unknown"
+            except aiohttp.ClientConnectorError:
+                errors["base"] = "cannot_connect"
+            except asyncio.TimeoutError:
+                errors["base"] = "timeout_connect"
             except Exception as ex:
                 _LOGGER.error("Unexpected error: %s", str(ex))
                 errors["base"] = "unknown"
@@ -186,8 +180,7 @@ class PiSignageConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             
             try:
                 # Try authentication again with OTP code
-                response = await self.hass.async_add_executor_job(
-                    self._test_connection_with_otp, 
+                response = await self._async_test_connection_with_otp(
                     self.api_url,
                     self.server_connection_info[CONF_USERNAME],
                     self.server_connection_info[CONF_PASSWORD],
@@ -203,7 +196,7 @@ class PiSignageConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     error_message = response.get("message", "") if response else ""
                     _LOGGER.error("OTP authentication failed: %s", error_message)
                     errors["base"] = "otp_failed"
-            except (ConnectionError, HTTPError, Timeout):
+            except (aiohttp.ClientError, asyncio.TimeoutError):
                 errors["base"] = "cannot_connect"
             except Exception as ex:
                 _LOGGER.error("Unexpected error during OTP verification: %s", str(ex))
@@ -217,35 +210,25 @@ class PiSignageConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             errors=errors,
         )
 
-    def _test_connection(self, api_url, username, password, server_type):
-        """Test connection to PiSignage and return authentication token."""
+    async def _async_test_connection(self, api_url, username, password, server_type):
+        """Test connection to PiSignage and return authentication result."""
         _LOGGER.debug("Testing PiSignage connection to: %s (server type: %s)", api_url, server_type)
+        session = async_get_clientsession(self.hass)
+        timeout = aiohttp.ClientTimeout(total=10)
         
         try:
-            session = requests.Session()
-            
-            # Different authentication approach based on server type
             if server_type == SERVER_TYPE_OPEN_SOURCE:
                 # For open source server, use basic auth
-                session.auth = (username, password)
-                
-                # Simply try to get the players list to verify credentials
-                response = session.get(
+                auth = aiohttp.BasicAuth(username, password)
+                async with session.get(
                     f"{api_url}/players",
-                    timeout=10,
-                )
-                
-                _LOGGER.debug("Got response status code: %s", response.status_code)
-                
-                # Check for successful status code
-                response.raise_for_status()
-                
-                # Try to parse as JSON to validate response format
-                result = response.json()
-                
-                # If we got this far, authentication was successful
-                return {"success": True}
-                
+                    auth=auth,
+                    timeout=timeout,
+                ) as response:
+                    _LOGGER.debug("Got response status code: %s", response.status)
+                    response.raise_for_status()
+                    await response.json()  # Validate JSON response
+                    return {"success": True}
             else:
                 # For hosted service, use token-based auth
                 auth_payload = {
@@ -257,66 +240,69 @@ class PiSignageConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 _LOGGER.debug("Sending authentication request with payload: %s", 
                             {**auth_payload, "password": "***REDACTED***"})
                 
-                response = session.post(
+                async with session.post(
                     f"{api_url}/session",
                     json=auth_payload,
-                    timeout=10,
-                )
-                
-                _LOGGER.debug("Got response status code: %s", response.status_code)
-                
-                # Try to decode JSON regardless of status code to handle error messages
-                try:
-                    result = response.json()
-                    _LOGGER.debug("Response content: %s", result)
+                    timeout=timeout,
+                ) as response:
+                    _LOGGER.debug("Got response status code: %s", response.status)
                     
-                    # Special handling for OTP required
-                    if response.status_code == 401 and result.get("message") == "OTP needed":
-                        _LOGGER.debug("OTP authentication required")
-                        return result
+                    # Try to decode JSON regardless of status code to handle error messages
+                    try:
+                        result = await response.json()
+                        _LOGGER.debug("Response content: %s", result)
                         
-                    # Check for non-200 status code after handling special cases
-                    response.raise_for_status()
+                        # Special handling for OTP required
+                        if response.status == 401 and result.get("message") == "OTP needed":
+                            _LOGGER.debug("OTP authentication required")
+                            return result
+                        
+                        # Check for non-200 status code after handling special cases
+                        if response.status == 401:
+                            # Store the parsed data and raise for error handling
+                            err = aiohttp.ClientResponseError(
+                                response.request_info,
+                                response.history,
+                                status=response.status,
+                                message=str(result),
+                            )
+                            err._response_data = result
+                            raise err
+                        
+                        response.raise_for_status()
+                        
+                        if result.get("token"):
+                            _LOGGER.debug("Authentication successful, token found in response")
+                            return {"success": True, "data": {"token": result.get("token")}}
+                        elif result.get("success") is False:
+                            _LOGGER.error("Authentication failed with message: %s", 
+                                        result.get("stat_message", "Unknown error"))
+                            return result
+                        else:
+                            _LOGGER.error("Ambiguous authentication response, no success flag or token found")
+                            return {"success": False, "stat_message": "Ambiguous response"}
+                    except aiohttp.ContentTypeError as ex:
+                        _LOGGER.error("Response isn't valid JSON: %s", str(ex))
+                        raise
                     
-                    # Check for successful response - either a "success" field or presence of token
-                    if result.get("token"):
-                        _LOGGER.debug("Authentication successful, token found in response")
-                        # Create a compatible response structure
-                        return {"success": True, "data": {"token": result.get("token")}}
-                    elif result.get("success") is False:
-                        _LOGGER.error("Authentication failed with message: %s", 
-                                    result.get("stat_message", "Unknown error"))
-                        return result
-                    else:
-                        _LOGGER.error("Ambiguous authentication response, no success flag or token found")
-                        return {"success": False, "stat_message": "Ambiguous response"}
-                except ValueError as ex:
-                    # Handle case where response isn't JSON
-                    _LOGGER.error("Response isn't valid JSON: %s", str(ex))
-                    _LOGGER.debug("Response content: %s", response.text)
-                    raise
-                    
-        except requests.exceptions.JSONDecodeError as ex:
+        except aiohttp.ContentTypeError as ex:
             _LOGGER.error("Failed to decode JSON response from server: %s", str(ex))
-            _LOGGER.debug("Response content: %s", response.text if 'response' in locals() else "No response")
             raise
-        except requests.exceptions.ConnectionError as ex:
+        except aiohttp.ClientConnectorError as ex:
             _LOGGER.error("Connection error to PiSignage server: %s", str(ex))
             raise
-        except requests.exceptions.RequestException as ex:
+        except aiohttp.ClientError as ex:
             _LOGGER.error("Request error to PiSignage server: %s", str(ex))
-            _LOGGER.debug("Response content: %s", response.text if 'response' in locals() else "No response")
             raise
             
-    def _test_connection_with_otp(self, api_url, username, password, otp_code):
-        """Test connection to PiSignage with OTP code and return authentication token."""
+    async def _async_test_connection_with_otp(self, api_url, username, password, otp_code):
+        """Test connection to PiSignage with OTP code."""
         session_url = f"{api_url}/session"
         _LOGGER.debug("Testing PiSignage connection with OTP to: %s", session_url)
+        session = async_get_clientsession(self.hass)
+        timeout = aiohttp.ClientTimeout(total=10)
         
         try:
-            session = requests.Session()
-            
-            # Format authentication payload with OTP code
             auth_payload = {
                 "email": username,
                 "password": password,
@@ -327,37 +313,30 @@ class PiSignageConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             _LOGGER.debug("Sending authentication request with OTP and payload: %s", 
                          {**auth_payload, "password": "***REDACTED***", "code": "***REDACTED***"})
             
-            response = session.post(
+            async with session.post(
                 session_url,
                 json=auth_payload,
-                timeout=10,
-            )
-            
-            _LOGGER.debug("Got response status code: %s", response.status_code)
-            
-            # Try to decode JSON regardless of status code
-            try:
-                result = response.json()
-                _LOGGER.debug("OTP auth response content: %s", result)
+                timeout=timeout,
+            ) as response:
+                _LOGGER.debug("Got response status code: %s", response.status)
                 
-                # Check for non-200 status code after parsing JSON
-                response.raise_for_status()
-                
-                # Check for successful response - either a "success" field or presence of token
-                if result.get("token"):
-                    _LOGGER.debug("Authentication with OTP successful, token found in response")
-                    # Create a compatible response structure
-                    return {"success": True, "data": {"token": result.get("token")}}
-                else:
-                    _LOGGER.error("Authentication with OTP failed")
-                    return {"success": False, "stat_message": "OTP authentication failed",
-                           "message": result.get("message", "Unknown error")}
-            except ValueError as ex:
-                # Handle case where response isn't JSON
-                _LOGGER.error("OTP Response isn't valid JSON: %s", str(ex))
-                _LOGGER.debug("OTP Response content: %s", response.text)
-                raise
-                
+                try:
+                    result = await response.json()
+                    _LOGGER.debug("OTP auth response content: %s", result)
+                    
+                    response.raise_for_status()
+                    
+                    if result.get("token"):
+                        _LOGGER.debug("Authentication with OTP successful, token found in response")
+                        return {"success": True, "data": {"token": result.get("token")}}
+                    else:
+                        _LOGGER.error("Authentication with OTP failed")
+                        return {"success": False, "stat_message": "OTP authentication failed",
+                               "message": result.get("message", "Unknown error")}
+                except aiohttp.ContentTypeError as ex:
+                    _LOGGER.error("OTP Response isn't valid JSON: %s", str(ex))
+                    raise
+                    
         except Exception as ex:
             _LOGGER.error("Error in OTP authentication: %s", str(ex))
             raise
