@@ -1,6 +1,7 @@
 """Support for PiSignage media players."""
 import asyncio
 import logging
+import time
 from typing import Any, Dict, List, Optional
 
 from homeassistant.components.media_player import (
@@ -34,8 +35,10 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
-# Delay before confirmation refresh after an action (seconds)
-CONFIRMATION_REFRESH_DELAY = 5
+# Safety timeout for optimistic state (seconds)
+# Optimistic state persists until the server confirms the expected state,
+# or this timeout expires (whichever comes first)
+OPTIMISTIC_TIMEOUT = 120
 
 SUPPORT_PISIGNAGE = (
     MediaPlayerEntityFeature.TURN_ON
@@ -86,7 +89,7 @@ class PiSignageMediaPlayer(MediaPlayerEntity):
         # Optimistic state tracking
         self._optimistic_state = None
         self._optimistic_source = None
-        self._confirmation_task = None
+        self._optimistic_set_time = None
         
         _LOGGER.debug("Initialized PiSignage media player entity: %s", self._name)
 
@@ -98,18 +101,65 @@ class PiSignageMediaPlayer(MediaPlayerEntity):
 
     def _handle_coordinator_update(self):
         """Handle updated data from the coordinator."""
-        # Clear optimistic state when real data arrives
-        self._optimistic_state = None
-        self._optimistic_source = None
+        if self._optimistic_state is not None:
+            real_state = self._compute_state_from_data()
+            elapsed = time.monotonic() - self._optimistic_set_time if self._optimistic_set_time else float('inf')
+
+            if real_state == self._optimistic_state:
+                # Server confirmed our expected state
+                _LOGGER.debug(
+                    "Optimistic state confirmed by server for %s", self._name
+                )
+                self._clear_optimistic_state()
+            elif elapsed > OPTIMISTIC_TIMEOUT:
+                # Safety timeout expired — revert to server state
+                _LOGGER.debug(
+                    "Optimistic state timeout for %s (%.0fs elapsed), reverting to server state",
+                    self._name, elapsed,
+                )
+                self._clear_optimistic_state()
+            else:
+                # Server hasn't caught up yet — keep optimistic state
+                _LOGGER.debug(
+                    "Keeping optimistic state for %s (server: %s, optimistic: %s, %.0fs elapsed)",
+                    self._name, real_state, self._optimistic_state, elapsed,
+                )
+
+        # Handle optimistic source independently
+        if self._optimistic_source is not None:
+            real_source = self._player_data.get("currentPlaylist")
+            elapsed = time.monotonic() - self._optimistic_set_time if self._optimistic_set_time else float('inf')
+            if real_source == self._optimistic_source or elapsed > OPTIMISTIC_TIMEOUT:
+                self._optimistic_source = None
+
         self.async_write_ha_state()
 
-    async def _async_delayed_refresh(self):
-        """Schedule a delayed coordinator refresh to confirm state."""
-        try:
-            await asyncio.sleep(CONFIRMATION_REFRESH_DELAY)
-            await self.coordinator.async_request_refresh()
-        except asyncio.CancelledError:
-            pass
+    def _clear_optimistic_state(self):
+        """Clear all optimistic state tracking."""
+        self._optimistic_state = None
+        self._optimistic_source = None
+        self._optimistic_set_time = None
+
+    def _compute_state_from_data(self):
+        """Compute state from coordinator data (without optimistic override)."""
+        player_data = self._player_data
+
+        config_entry = self.hass.config_entries.async_get_entry(
+            self.registry_entry.config_entry_id
+        )
+        ignore_cec = config_entry.options.get(CONF_IGNORE_CEC, {}).get(
+            self._player_id, False
+        )
+
+        is_cec_supported = player_data.get("isCecSupported", False) and not ignore_cec
+        cec_tv_status = player_data.get("cecTvStatus", False)
+        playlist_on = player_data.get("playlistOn", False)
+
+        if is_cec_supported and not cec_tv_status:
+            return STATE_STANDBY
+        if playlist_on:
+            return STATE_PLAYING
+        return STATE_IDLE
 
     @property
     def device_info(self):
@@ -167,24 +217,7 @@ class PiSignageMediaPlayer(MediaPlayerEntity):
         # Return optimistic state if set (before server confirms)
         if self._optimistic_state is not None:
             return self._optimistic_state
-        
-        player_data = self._player_data
-
-        # Get the config entry directly from the hass context
-        config_entry = self.hass.config_entries.async_get_entry(self.registry_entry.config_entry_id)
-        ignore_cec = config_entry.options.get(CONF_IGNORE_CEC, {}).get(self._player_id, False)
-        
-        is_cec_supported = player_data.get("isCecSupported", False) and not ignore_cec
-        cec_tv_status = player_data.get("cecTvStatus", False)
-        playlist_on = player_data.get("playlistOn", False)
-
-        if is_cec_supported and not cec_tv_status:
-            return STATE_STANDBY
-
-        if playlist_on:
-            return STATE_PLAYING
-
-        return STATE_IDLE
+        return self._compute_state_from_data()
 
     @property
     def media_content_type(self) -> str:
@@ -242,17 +275,12 @@ class PiSignageMediaPlayer(MediaPlayerEntity):
         return attrs
 
     def _set_optimistic_state(self, state, source=None):
-        """Set optimistic state and schedule a delayed confirmation refresh."""
+        """Set optimistic state and record the time it was set."""
         self._optimistic_state = state
+        self._optimistic_set_time = time.monotonic()
         if source is not None:
             self._optimistic_source = source
         self.async_write_ha_state()
-        
-        # Cancel any existing confirmation task
-        if self._confirmation_task is not None:
-            self._confirmation_task.cancel()
-        # Schedule a delayed refresh to confirm actual state from server
-        self._confirmation_task = asyncio.create_task(self._async_delayed_refresh())
 
     async def async_turn_on(self) -> None:
         """Turn the device on."""
