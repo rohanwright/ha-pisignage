@@ -10,7 +10,6 @@ blueprint:
         entity:
           multiple: true
           filter:
-            - integration: pisignage
               domain: media_player
     playlist_mode:
       name: Playlist Selection Mode
